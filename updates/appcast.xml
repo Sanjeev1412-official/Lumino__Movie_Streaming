@@ -6,16 +6,15 @@
     <language>en</language>
 
     <item>
-    <title>Version 1.1.3</title>
-    <description>Modern player controls and smooth transitions.</description>
-    <pubDate>Sat, 25 Apr 2026 15:15:00 +0000</pubDate>
-    <enclosure 
-        url="https://github.com/Sanjeevsnair/Lumino_window_Autoupdater/releases/download/v1.1.3%2B2/Lumino_Setup_v1.1.3.exe"
-        sparkle:version="2" 
-        sparkle:shortVersionString="1.1.3"
-        type="application/octet-stream"
+      <title>Version 1.1.3</title>
+      <description>Modern player controls and smooth transitions.</description>
+      <pubDate>Sat, 25 Apr 2026 15:15:00 +0000</pubDate>
+      <enclosure 
+          url="https://github.com/Sanjeevsnair/Lumino_window_Autoupdater/releases/download/v1.1.3%2B2/Lumino_Setup_v1.1.3.exe"
+          sparkle:version="2" 
+          sparkle:shortVersionString="1.1.3"
+          type="application/octet-stream" />
     </item>
-
 
   </channel>
 </rss>
