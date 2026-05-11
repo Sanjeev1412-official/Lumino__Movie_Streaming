@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lumino | Cinematic Movie Streaming</title>
+    <title>Lumino | Movie Streaming</title>
     <link
         href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap"
         rel="stylesheet">
@@ -152,49 +152,50 @@
             overflow: hidden;
         }
 
-        /* Ambient orbs */
+        /* Ambient orbs — ENHANCED FOR DESKTOP */
         .orb {
             position: absolute;
             border-radius: 50%;
-            filter: blur(90px);
             pointer-events: none;
             z-index: 0;
         }
 
         .orb-1 {
-            width: 560px;
-            height: 560px;
-            background: radial-gradient(circle, rgba(242, 169, 59, .18) 0%, transparent 70%);
-            top: -120px;
-            left: -80px;
-            animation: drift1 14s ease-in-out infinite alternate;
+            width: 750px;
+            height: 750px;
+            background: radial-gradient(circle, rgba(242, 169, 59, .35) 0%, transparent 70%);
+            filter: blur(80px);
+            top: -150px;
+            left: -100px;
+            animation: drift1 8s ease-in-out infinite alternate;
         }
 
         .orb-2 {
-            width: 400px;
-            height: 400px;
-            background: radial-gradient(circle, rgba(242, 100, 59, .1) 0%, transparent 70%);
-            bottom: -80px;
-            right: 300px;
-            animation: drift2 18s ease-in-out infinite alternate;
+            width: 550px;
+            height: 550px;
+            background: radial-gradient(circle, rgba(242, 100, 59, .22) 0%, transparent 70%);
+            filter: blur(80px);
+            bottom: -100px;
+            right: 200px;
+            animation: drift2 11s ease-in-out infinite alternate;
         }
 
         .orb-3 {
-            width: 280px;
-            height: 280px;
-            background: radial-gradient(circle, rgba(242, 169, 59, .12) 0%, transparent 70%);
-            top: 40%;
-            right: 100px;
-            animation: drift1 11s ease-in-out infinite alternate-reverse;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, rgba(242, 169, 59, .25) 0%, transparent 70%);
+            filter: blur(65px);
+            top: 30%;
+            right: 50px;
+            animation: drift1 7s ease-in-out infinite alternate-reverse;
         }
 
         @keyframes drift1 {
             from {
                 transform: translate(0, 0)
             }
-
             to {
-                transform: translate(40px, 30px)
+                transform: translate(60px, 40px)
             }
         }
 
@@ -202,9 +203,8 @@
             from {
                 transform: translate(0, 0)
             }
-
             to {
-                transform: translate(-30px, -25px)
+                transform: translate(-50px, -35px)
             }
         }
 
@@ -241,13 +241,11 @@
         }
 
         @keyframes pdot {
-
             0%,
             100% {
                 opacity: 1;
                 transform: scale(1)
             }
-
             50% {
                 opacity: .4;
                 transform: scale(.6)
@@ -268,7 +266,6 @@
                 opacity: 0;
                 transform: translateY(40px) rotateX(-20deg);
             }
-
             100% {
                 opacity: 1;
                 transform: translateY(0) rotateX(0);
@@ -289,7 +286,6 @@
             0% {
                 background-position: 200% center
             }
-
             100% {
                 background-position: -200% center
             }
@@ -436,12 +432,10 @@
         }
 
         @keyframes float {
-
             0%,
             100% {
                 transform: translateY(0) rotate(-1deg)
             }
-
             50% {
                 transform: translateY(-18px) rotate(1deg)
             }
@@ -734,24 +728,20 @@
         }
 
         @keyframes fbob1 {
-
             0%,
             100% {
                 transform: translateY(0)
             }
-
             50% {
                 transform: translateY(-8px)
             }
         }
 
         @keyframes fbob2 {
-
             0%,
             100% {
                 transform: translateY(0)
             }
-
             50% {
                 transform: translateY(8px)
             }
@@ -805,7 +795,6 @@
                 opacity: 0;
                 transform: translateX(-30px)
             }
-
             to {
                 opacity: 1;
                 transform: translateX(0)
@@ -817,7 +806,6 @@
                 opacity: 0;
                 transform: translateX(30px)
             }
-
             to {
                 opacity: 1;
                 transform: translateX(0)
@@ -1349,7 +1337,6 @@
             0% {
                 background-position: 200%
             }
-
             100% {
                 background-position: -200%
             }
@@ -1395,7 +1382,48 @@
             display: none !important;
         }
 
+        /* ── MOBILE MEDIA QUERY (REVERTS TO OLDER STYLING) ── */
         @media(max-width:900px) {
+            .orb-1 {
+                width: 560px;
+                height: 560px;
+                background: radial-gradient(circle, rgba(242, 169, 59, .18) 0%, transparent 70%);
+                filter: blur(90px);
+                top: -120px;
+                left: -80px;
+                animation: drift1 14s ease-in-out infinite alternate;
+            }
+
+            .orb-2 {
+                width: 400px;
+                height: 400px;
+                background: radial-gradient(circle, rgba(242, 100, 59, .1) 0%, transparent 70%);
+                filter: blur(90px);
+                bottom: -80px;
+                right: 300px;
+                animation: drift2 18s ease-in-out infinite alternate;
+            }
+
+            .orb-3 {
+                width: 280px;
+                height: 280px;
+                background: radial-gradient(circle, rgba(242, 169, 59, .12) 0%, transparent 70%);
+                filter: blur(90px);
+                top: 40%;
+                right: 100px;
+                animation: drift1 11s ease-in-out infinite alternate-reverse;
+            }
+
+            @keyframes drift1 {
+                from { transform: translate(0, 0) }
+                to { transform: translate(40px, 30px) }
+            }
+
+            @keyframes drift2 {
+                from { transform: translate(0, 0) }
+                to { transform: translate(-30px, -25px) }
+            }
+
             .hero {
                 grid-template-columns: 1fr;
                 min-height: auto;
@@ -1448,10 +1476,8 @@
         <div class="logo" onclick="show('home')">LUMINO</div>
         <div class="nav-links">
             <a id="n-home" class="active" onclick="show('home')">Home</a>
-            <a
-                onclick="show('home');setTimeout(()=>document.getElementById('features').scrollIntoView({behavior:'smooth'}),80)">Features</a>
-            <a
-                onclick="show('home');setTimeout(()=>document.getElementById('library').scrollIntoView({behavior:'smooth'}),80)">Library</a>
+            <a onclick="show('home');setTimeout(()=>document.getElementById('features').scrollIntoView({behavior:'smooth'}),80)">Features</a>
+            <a onclick="show('home');setTimeout(()=>document.getElementById('library').scrollIntoView({behavior:'smooth'}),80)">Library</a>
             <a id="n-download" onclick="show('download')" class="nav-cta">Download</a>
         </div>
     </nav>
@@ -1470,7 +1496,7 @@
                 <div class="hero-eyebrow"><span class="dot"></span>v0.0 · Now Available</div>
                 <h1 class="hero-title">
                     Stream Everything.<br>
-                    <span class="line-accent">Own Nothing. Pay Nothing.</span>
+                    <span class="line-accent"> Pay Nothing.</span>
                 </h1>
                 <p class="hero-sub">One app for movies, TV shows and anime — up to 4K HDR, zero ads, zero cost.</p>
 
@@ -1482,7 +1508,6 @@
                 </div>
                 <div class="trust-row">
                     <span class="trust-badge"><i class="fas fa-shield-alt"></i> No malware</span>
-
                     <span class="trust-badge"><i class="fas fa-ban"></i> Zero ads</span>
                 </div>
             </div>
@@ -1612,8 +1637,6 @@
             </div>
         </header>
 
-
-
         <!-- FEATURES -->
         <section id="features">
             <div class="section-header">
@@ -1660,7 +1683,7 @@
                 <div class="feat-card card">
                     <i class="fas fa-desktop"></i>
                     <h3>Multi-Device Support</h3>
-                    <p>Works on Android, PC, iPhone, Fire TV, Android TV, Smart TV, and Mac tablets seamlessly.</p>
+                    <p>Works on Android, PC, iPhone, Android TV seamlessly.</p>
                 </div>
                 <div class="feat-card card">
                     <i class="fas fa-sync-alt"></i>
@@ -1735,25 +1758,24 @@
                     <img src="https://upload.wikimedia.org/wikipedia/commons/b/b0/Hoichoi-720p-transperant.png?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=thumbnail_unscaled&_=20190420063217" alt="Hoichoi">
                 </div>
             </div>
-        </section>
 
-        <!-- Genre Pills -->
-        <div style="text-align:center;margin-top:3rem;">
-            <h3 style="margin-bottom:1.2rem;font-family:'Syne',sans-serif;">Browse by <span class="amber">Genre</span>
-            </h3>
-            <div class="pill-grid">
-                <span class="pill">⚔️ Action</span>
-                <span class="pill">😂 Comedy</span>
-                <span class="pill">💕 Romance</span>
-                <span class="pill">🔍 Crime</span>
-                <span class="pill">🗺️ Adventure</span>
-                <span class="pill">😱 Thriller</span>
-                <span class="pill">👻 Horror</span>
-                <span class="pill">🚀 Sci-Fi</span>
-                <span class="pill">🎭 Drama</span>
-                <span class="pill">🧸 Kids</span>
+            <!-- Genre Pills -->
+            <div style="text-align:center;margin-top:3rem;">
+                <h3 style="margin-bottom:1.2rem;font-family:'Syne',sans-serif;">Browse by <span class="amber">Genre</span>
+                </h3>
+                <div class="pill-grid">
+                    <span class="pill">⚔️ Action</span>
+                    <span class="pill">😂 Comedy</span>
+                    <span class="pill">💕 Romance</span>
+                    <span class="pill">🔍 Crime</span>
+                    <span class="pill">🗺️ Adventure</span>
+                    <span class="pill">😱 Thriller</span>
+                    <span class="pill">👻 Horror</span>
+                    <span class="pill">🚀 Sci-Fi</span>
+                    <span class="pill">🎭 Drama</span>
+                    <span class="pill">🧸 Kids</span>
+                </div>
             </div>
-        </div>
         </section>
 
         <!-- CONTENT LIBRARY -->
@@ -1826,9 +1848,6 @@
 
             </div>
         </section>
-
-
-
 
         <!-- COMPARISON -->
         <section>
@@ -2068,7 +2087,7 @@
     <script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
-        // ── SPA ──
+        // ── SPA ROUTING ──
         function show(v) {
             ['home', 'download'].forEach(x => document.getElementById('view-' + x).classList.add('hidden'));
             document.getElementById('view-' + v).classList.remove('hidden');
@@ -2077,18 +2096,28 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        // ── PARTICLES ──
+        // ── INITIALIZATION ──
         document.addEventListener('DOMContentLoaded', () => {
+            
+            // Check for URL Parameter to route directly to Download page
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('page') === 'download') {
+                show('download');
+            }
+
+            // Detect Mobile for Particles settings to keep the old ones on Mobile and increase glow/animation on Desktop
+            const isMobile = window.innerWidth <= 900;
+
             if (typeof particlesJS !== 'undefined') {
                 particlesJS('particles-js', {
                     particles: {
-                        number: { value: 70, density: { enable: true, value_area: 900 } },
-                        color: { value: '#ffffff' },
+                        number: { value: isMobile ? 70 : 100, density: { enable: true, value_area: 900 } },
+                        color: { value: isMobile ? '#ffffff' : '#f2a93b' },
                         shape: { type: 'circle' },
-                        opacity: { value: 0.18, random: true },
-                        size: { value: 2.5, random: true },
-                        line_linked: { enable: true, distance: 140, color: '#f2a93b', opacity: 0.12, width: 1 },
-                        move: { enable: true, speed: .8, direction: 'none', out_mode: 'out' }
+                        opacity: { value: isMobile ? 0.18 : 0.35, random: true },
+                        size: { value: isMobile ? 2.5 : 3.5, random: true },
+                        line_linked: { enable: true, distance: isMobile ? 140 : 160, color: '#f2a93b', opacity: isMobile ? 0.12 : 0.3, width: isMobile ? 1 : 1.5 },
+                        move: { enable: true, speed: isMobile ? 0.8 : 1.5, direction: 'none', out_mode: 'out' }
                     },
                     interactivity: {
                         detect_on: 'canvas',
@@ -2099,6 +2128,8 @@
                 });
             }
             fetchRelease();
+            initReveal();
+            initTilt();
         });
 
         // ── GITHUB RELEASE ──
@@ -2241,11 +2272,6 @@
                 });
             });
         }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            initReveal();
-            initTilt();
-        });
     </script>
 </body>
 
