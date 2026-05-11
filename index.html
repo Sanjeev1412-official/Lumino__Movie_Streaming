@@ -1,0 +1,460 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumino | Cinematic Movie Streaming</title>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-dark: #0a0a0f;
+            --neon-accent: #00f0ff;
+            --neon-glow: 0 0 10px rgba(0, 240, 255, 0.5), 0 0 20px rgba(0, 240, 255, 0.3);
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-main: #ffffff;
+            --text-muted: #a0a0b0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            overflow-x: hidden;
+        }
+
+        #particles-js {
+            position: fixed;
+            width: 100vw;
+            height: 100vh;
+            z-index: -1;
+            background: radial-gradient(circle at center, #1a1a2e 0%, var(--bg-dark) 100%);
+        }
+
+        .neon-text {
+            color: var(--neon-accent);
+            text-shadow: var(--neon-glow);
+        }
+
+        .glass-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem 5%;
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--glass-border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .nav-links a {
+            color: var(--text-main);
+            text-decoration: none;
+            margin-left: 2rem;
+            transition: color 0.3s;
+        }
+
+        .nav-links a:hover {
+            color: var(--neon-accent);
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(15px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 3rem;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 90vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 5%;
+        }
+
+        .hero-content {
+            max-width: 800px;
+            text-align: center;
+        }
+
+        .hero-content h1 {
+            font-size: 3.5rem;
+            margin: 1.5rem 0;
+            line-height: 1.1;
+        }
+
+        .hero-content p {
+            color: var(--text-muted);
+            font-size: 1.2rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .badge-container {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+        }
+
+        .badge {
+            background: rgba(0, 240, 255, 0.1);
+            color: var(--neon-accent);
+            padding: 0.5rem 1rem;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            border: 1px solid var(--neon-accent);
+        }
+
+        .badge.ghost {
+            background: transparent;
+            border-color: var(--glass-border);
+            color: var(--text-muted);
+        }
+
+        /* Buttons */
+        .buttons-container {
+            display: flex;
+            gap: 1.5rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            text-decoration: none;
+            color: var(--text-main);
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .glass-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+        }
+
+        .glass-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .btn i {
+            font-size: 2rem;
+        }
+
+        .btn-text {
+            display: flex;
+            flex-direction: column;
+            text-align: left;
+        }
+
+        .btn-text span {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* Dynamic OS Highlight */
+        .btn.highlighted {
+            background: rgba(0, 240, 255, 0.15);
+            border-color: var(--neon-accent);
+            box-shadow: var(--neon-glow);
+        }
+
+        .btn.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+            filter: grayscale(100%);
+        }
+
+        /* Features */
+        .features {
+            padding: 5rem 5%;
+            text-align: center;
+        }
+
+        .section-title {
+            font-size: 2.5rem;
+            margin-bottom: 3rem;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+        }
+
+        .feature-card i {
+            font-size: 3rem;
+            margin-bottom: 1.5rem;
+        }
+
+        /* Changelog Section */
+        .changelog-section {
+            padding: 5rem 5%;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .markdown-body {
+            text-align: left;
+            color: var(--text-muted);
+            line-height: 1.6;
+            margin-top: 2rem;
+        }
+
+        .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+            color: var(--text-main);
+            margin: 1.5rem 0 1rem;
+        }
+
+        .markdown-body ul {
+            margin-left: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .skeleton-loader {
+            height: 20px;
+            background: linear-gradient(90deg, var(--glass-bg) 25%, rgba(255,255,255,0.1) 50%, var(--glass-bg) 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .skeleton-loader.short { width: 60%; }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        @media (max-width: 768px) {
+            .hero-content h1 { font-size: 2.5rem; }
+            .buttons-container { flex-direction: column; }
+            .nav-links { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Particle Background -->
+    <div id="particles-js"></div>
+
+    <!-- Navigation -->
+    <nav class="glass-nav">
+        <div class="logo">
+            <span class="neon-text">LUMINO</span>
+        </div>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#changelog-section">What's New</a>
+            <a href="#faq">FAQ</a>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="hero">
+        <div class="hero-content glass-card">
+            <div class="badge-container">
+                <span class="badge" id="version-badge">Fetching latest...</span>
+                <span class="badge ghost" id="date-badge">--/--/----</span>
+            </div>
+            <h1>Your Ultimate <span class="neon-text">Cinematic</span> Experience.</h1>
+            <p>Stream your favorite movies with a beautiful custom interface and an advanced video player. Now available cross-platform.</p>
+            
+            <div class="download-actions" id="download-actions">
+                <!-- Loading State -->
+                <p id="loading-text"><i class="fas fa-circle-notch fa-spin"></i> Fetching releases from GitHub...</p>
+                
+                <div class="buttons-container" style="display: none;" id="btn-container">
+                    <a href="#" id="btn-android" class="btn glass-btn">
+                        <i class="fab fa-android"></i>
+                        <div class="btn-text">
+                            <span>Download for</span>
+                            <strong>Android (.apk)</strong>
+                        </div>
+                    </a>
+                    <a href="#" id="btn-windows" class="btn glass-btn">
+                        <i class="fab fa-windows"></i>
+                        <div class="btn-text">
+                            <span>Download for</span>
+                            <strong>Windows (.exe)</strong>
+                        </div>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <h2 class="section-title">Built for <span class="neon-text">Binge-Watching</span></h2>
+        <div class="feature-grid">
+            <div class="feature-card glass-card">
+                <i class="fas fa-mobile-alt neon-text"></i>
+                <h3>Custom UI Design</h3>
+                <p>A highly polished, intuitive interface designed specifically for mobile and desktop viewing comfort.</p>
+            </div>
+            <div class="feature-card glass-card">
+                <i class="fas fa-play-circle neon-text"></i>
+                <h3>Advanced Video Player</h3>
+                <p>Robust playback logic ensuring smooth, buffer-free streaming of high-quality cinematic content.</p>
+            </div>
+            <div class="feature-card glass-card">
+                <i class="fas fa-bolt neon-text"></i>
+                <h3>Auto-Updates</h3>
+                <p>Built-in update mechanics keep you on the latest version seamlessly.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Release Notes / Changelog Section -->
+    <section id="changelog-section" class="changelog-section">
+        <div class="changelog-container glass-card">
+            <h2>Release Notes <span id="changelog-version" class="neon-text"></span></h2>
+            <div id="changelog-content" class="markdown-body">
+                <!-- Markdown will be injected here -->
+                <div class="skeleton-loader"></div>
+                <div class="skeleton-loader short"></div>
+                <div class="skeleton-loader"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- External Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // 1. Initialize Particle Background
+            particlesJS("particles-js", {
+                particles: {
+                    number: { value: 80, density: { enable: true, value_area: 800 } },
+                    color: { value: "#ffffff" },
+                    shape: { type: "circle" },
+                    opacity: { value: 0.2, random: true },
+                    size: { value: 3, random: true },
+                    line_linked: { enable: true, distance: 150, color: "#00f0ff", opacity: 0.1, width: 1 },
+                    move: { enable: true, speed: 1, direction: "none", random: false, straight: false, out_mode: "out", bounce: false }
+                },
+                interactivity: {
+                    detect_on: "canvas",
+                    events: { onhover: { enable: true, mode: "grab" }, resize: true },
+                    modes: { grab: { distance: 140, line_linked: { opacity: 0.5 } } }
+                },
+                retina_detect: true
+            });
+
+            // 2. GitHub API Integration
+            const GITHUB_REPO_URL = 'https://api.github.com/repos/Sanjeevsnair/Lumino_window_Autoupdater/releases/latest';
+
+            async function fetchLatestRelease() {
+                try {
+                    const response = await fetch(GITHUB_REPO_URL);
+                    if (!response.ok) throw new Error('GitHub API Error');
+                    const data = await response.json();
+
+                    updateUI(data);
+                } catch (error) {
+                    console.error("Failed to fetch release:", error);
+                    handleErrorState();
+                }
+            }
+
+            function updateUI(releaseData) {
+                // Hide loader, show buttons
+                document.getElementById('loading-text').style.display = 'none';
+                document.getElementById('btn-container').style.display = 'flex';
+
+                // Update Text Elements
+                document.getElementById('version-badge').textContent = `v${releaseData.tag_name}`;
+                document.getElementById('changelog-version').textContent = `(v${releaseData.tag_name})`;
+                
+                const date = new Date(releaseData.published_at);
+                document.getElementById('date-badge').textContent = date.toLocaleDateString(undefined, {
+                    year: 'numeric', month: 'long', day: 'numeric'
+                });
+
+                // Parse Markdown Changelog
+                const changelogElement = document.getElementById('changelog-content');
+                if (releaseData.body) {
+                    changelogElement.innerHTML = marked.parse(releaseData.body);
+                } else {
+                    changelogElement.innerHTML = "<p>No release notes provided for this version.</p>";
+                }
+
+                // Map Assets
+                let apkUrl = null;
+                let windowsUrl = null;
+
+                releaseData.assets.forEach(asset => {
+                    const name = asset.name.toLowerCase();
+                    if (name.endsWith('.apk')) {
+                        apkUrl = asset.browser_download_url;
+                    } else if (name.endsWith('.exe') || name.endsWith('.msix')) {
+                        windowsUrl = asset.browser_download_url;
+                    }
+                });
+
+                // Setup Buttons
+                setupDownloadButton('btn-android', apkUrl);
+                setupDownloadButton('btn-windows', windowsUrl);
+
+                // Highlight recommended download based on OS
+                highlightRecommendedOS();
+            }
+
+            function setupDownloadButton(btnId, url) {
+                const btn = document.getElementById(btnId);
+                if (url) {
+                    btn.href = url;
+                    btn.classList.remove('disabled');
+                } else {
+                    btn.href = "#";
+                    btn.classList.add('disabled');
+                    btn.title = "Not available for this release";
+                }
+            }
+
+            function highlightRecommendedOS() {
+                const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+                const androidBtn = document.getElementById('btn-android');
+                const windowsBtn = document.getElementById('btn-windows');
+
+                if (/android/i.test(userAgent)) {
+                    androidBtn.classList.add('highlighted');
+                } else if (/windows/i.test(userAgent)) {
+                    windowsBtn.classList.add('highlighted');
+                }
+            }
+
+            function handleErrorState() {
+                document.getElementById('loading-text').innerHTML = '<i class="fas fa-exclamation-triangle text-danger"></i> Failed to connect to update server.';
+                document.getElementById('changelog-content').innerHTML = '<p>Unable to load release notes. Please check your internet connection or visit our GitHub directly.</p>';
+            }
+
+            // Initialize API Call
+            fetchLatestRelease();
+        });
+    </script>
+</body>
+</html>
