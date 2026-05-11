@@ -2096,25 +2096,53 @@
     <script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
-        // ── SPA ROUTING ──
-        function show(v) {
+        // ── SPA ROUTING WITH HISTORY API ──
+        function show(v, pushToHistory = true) {
+            // Hide all views
             ['home', 'download'].forEach(x => document.getElementById('view-' + x).classList.add('hidden'));
+            
+            // Show requested view
             document.getElementById('view-' + v).classList.remove('hidden');
-            ['n-home', 'n-download'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove('active'); });
-            const a = document.getElementById('n-' + v); if (a) a.classList.add('active');
+            
+            // Update active state in nav
+            ['n-home', 'n-download'].forEach(id => { 
+                const el = document.getElementById(id); 
+                if (el) el.classList.remove('active'); 
+            });
+            const a = document.getElementById('n-' + v); 
+            if (a) a.classList.add('active');
+            
+            // Scroll to top
             window.scrollTo({ top: 0, behavior: 'smooth' });
+
+            // Push State to History Stack
+            if (pushToHistory) {
+                const url = v === 'home' ? window.location.pathname : '?page=' + v;
+                history.pushState({ view: v }, '', url);
+            }
         }
+
+        // Handle the Browser Back / Forward Buttons
+        window.addEventListener('popstate', (event) => {
+            // Check what state was pushed. If empty, default back to home
+            const view = (event.state && event.state.view) ? event.state.view : 'home';
+            show(view, false); // pass false so we don't infinitely push states
+        });
 
         // ── INITIALIZATION ──
         document.addEventListener('DOMContentLoaded', () => {
             
-            // Check for URL Parameter to route directly to Download page
+            // Check for URL Parameter to route initially
             const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.get('page') === 'download') {
-                show('download');
-            }
+            const initialView = urlParams.get('page') === 'download' ? 'download' : 'home';
+            
+            // Set the initial view WITHOUT pushing a new history state
+            show(initialView, false);
+            
+            // Replace the current state so the initial load is recognized by history
+            history.replaceState({ view: initialView }, '', window.location.search || window.location.pathname);
 
-            // Detect Mobile for Particles settings to keep the old ones on Mobile and increase glow/animation on Desktop
+            // Detect Mobile for Particles
             const isMobile = window.innerWidth <= 900;
 
             if (typeof particlesJS !== 'undefined') {
@@ -2163,7 +2191,6 @@
             document.getElementById('ver-badge').textContent = 'v' + d.tag_name;
             document.getElementById('cl-ver').textContent = '(v' + d.tag_name + ')';
 
-            // update hero chip safely
             const eyebrow = document.querySelector('.hero-eyebrow');
             if (eyebrow) {
                 eyebrow.innerHTML = `<span class="dot"></span>v${d.tag_name} · Now Available`;
@@ -2173,7 +2200,6 @@
             const dateStr = dt.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
             document.getElementById('date-badge').textContent = dateStr;
 
-            // Populate split spec tables
             const specVerApk = document.getElementById('spec-ver-apk');
             const specDateApk = document.getElementById('spec-date-apk');
             const specSizeApk = document.getElementById('spec-size-apk');
@@ -2269,7 +2295,6 @@
                 });
             }
 
-            // Spotlight effect for cards
             document.querySelectorAll('.card, .feat-card, .ott-card').forEach(card => {
                 card.addEventListener('mousemove', (e) => {
                     const rect = card.getBoundingClientRect();
