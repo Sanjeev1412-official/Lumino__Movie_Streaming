@@ -1,460 +1,2216 @@
-
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lumino | Cinematic Movie Streaming</title>
-    
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <!-- FontAwesome -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
     <style>
         :root {
-            --bg-dark: #0a0a0f;
-            --neon-accent: #00f0ff;
-            --neon-glow: 0 0 10px rgba(0, 240, 255, 0.5), 0 0 20px rgba(0, 240, 255, 0.3);
-            --glass-bg: rgba(255, 255, 255, 0.03);
-            --glass-border: rgba(255, 255, 255, 0.1);
-            --text-main: #ffffff;
-            --text-muted: #a0a0b0;
+            --bg: #080807;
+            --amber: #f2a93b;
+            --amber-mid: rgba(242, 169, 59, 0.18);
+            --amber-low: rgba(242, 169, 59, 0.07);
+            --amber-glow: 0 0 40px rgba(242, 169, 59, 0.25);
+            --border: rgba(255, 255, 255, 0.07);
+            --card: rgba(255, 255, 255, 0.035);
+            --text: #ede9e3;
+            --muted: #7d7871;
+            --muted2: #b0aa9f;
         }
 
-        * {
+        *,
+        *::before,
+        *::after {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: 'Outfit', sans-serif;
+        }
+
+        html {
+            scroll-behavior: smooth;
         }
 
         body {
-            background-color: var(--bg-dark);
-            color: var(--text-main);
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'DM Sans', sans-serif;
             overflow-x: hidden;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 9999;
+            opacity: .6;
+        }
+
+        /* ── REVEAL ANIMATION ── */
+        .reveal {
+            opacity: 0;
+            transform: translateY(40px) scale(0.95) rotateX(10deg);
+            transform-origin: bottom center;
+            transition: opacity .8s cubic-bezier(.22, 1, .36, 1), transform .8s cubic-bezier(.22, 1, .36, 1);
+            will-change: transform, opacity;
+        }
+
+        .reveal.active {
+            opacity: 1;
+            transform: translateY(0) scale(1) rotateX(0deg);
+        }
+
+        [data-tilt] {
+            transition: transform 0.2s cubic-bezier(0.03, 0.98, 0.52, 0.99);
+            transform-style: preserve-3d;
         }
 
         #particles-js {
             position: fixed;
-            width: 100vw;
-            height: 100vh;
+            inset: 0;
             z-index: -1;
-            background: radial-gradient(circle at center, #1a1a2e 0%, var(--bg-dark) 100%);
+            background: #080807;
         }
 
-        .neon-text {
-            color: var(--neon-accent);
-            text-shadow: var(--neon-glow);
+        h1,
+        h2,
+        h3,
+        h4 {
+            font-family: 'Syne', sans-serif;
+            letter-spacing: -.025em;
         }
 
-        .glass-nav {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 1.5rem 5%;
-            background: var(--glass-bg);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid var(--glass-border);
+        /* ── NAV ── */
+        nav {
             position: sticky;
             top: 0;
-            z-index: 100;
+            z-index: 500;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: .95rem 5%;
+            background: rgba(8, 8, 7, .78);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            font-family: 'Syne', sans-serif;
+            font-weight: 800;
+            font-size: 1.35rem;
+            letter-spacing: .1em;
+            color: var(--amber);
+            text-shadow: 0 0 20px rgba(242, 169, 59, .4);
+            cursor: pointer;
         }
 
         .nav-links a {
-            color: var(--text-main);
+            color: var(--muted);
             text-decoration: none;
             margin-left: 2rem;
-            transition: color 0.3s;
+            font-size: .88rem;
+            font-weight: 500;
+            transition: color .2s;
+            cursor: pointer;
         }
 
-        .nav-links a:hover {
-            color: var(--neon-accent);
+        .nav-links a:hover,
+        .nav-links a.active {
+            color: var(--amber);
         }
 
-        .glass-card {
-            background: var(--glass-bg);
-            backdrop-filter: blur(15px);
-            border: 1px solid var(--glass-border);
-            border-radius: 20px;
-            padding: 3rem;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        .nav-cta {
+            background: var(--amber-mid);
+            border: 1px solid rgba(242, 169, 59, .35);
+            color: var(--amber) !important;
+            padding: .38rem .95rem;
+            border-radius: 8px;
+            font-weight: 600 !important;
         }
 
-        /* Hero Section */
+        .nav-cta:hover {
+            background: rgba(242, 169, 59, .28) !important;
+        }
+
+        /* ══════════════════════
+           HERO — SPLIT
+        ══════════════════════ */
         .hero {
-            min-height: 90vh;
-            display: flex;
+            position: relative;
+            min-height: 92vh;
+            display: grid;
+            grid-template-columns: 1fr 480px;
             align-items: center;
-            justify-content: center;
-            padding: 2rem 5%;
+            gap: 3rem;
+            padding: 5rem 5% 4rem;
+            overflow: hidden;
         }
 
-        .hero-content {
-            max-width: 800px;
-            text-align: center;
+        /* Ambient orbs */
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(90px);
+            pointer-events: none;
+            z-index: 0;
         }
 
-        .hero-content h1 {
-            font-size: 3.5rem;
-            margin: 1.5rem 0;
-            line-height: 1.1;
+        .orb-1 {
+            width: 560px;
+            height: 560px;
+            background: radial-gradient(circle, rgba(242, 169, 59, .18) 0%, transparent 70%);
+            top: -120px;
+            left: -80px;
+            animation: drift1 14s ease-in-out infinite alternate;
         }
 
-        .hero-content p {
-            color: var(--text-muted);
-            font-size: 1.2rem;
-            margin-bottom: 2.5rem;
+        .orb-2 {
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, rgba(242, 100, 59, .1) 0%, transparent 70%);
+            bottom: -80px;
+            right: 300px;
+            animation: drift2 18s ease-in-out infinite alternate;
         }
 
-        .badge-container {
-            display: flex;
-            justify-content: center;
-            gap: 1rem;
+        .orb-3 {
+            width: 280px;
+            height: 280px;
+            background: radial-gradient(circle, rgba(242, 169, 59, .12) 0%, transparent 70%);
+            top: 40%;
+            right: 100px;
+            animation: drift1 11s ease-in-out infinite alternate-reverse;
         }
 
-        .badge {
-            background: rgba(0, 240, 255, 0.1);
-            color: var(--neon-accent);
-            padding: 0.5rem 1rem;
+        @keyframes drift1 {
+            from {
+                transform: translate(0, 0)
+            }
+
+            to {
+                transform: translate(40px, 30px)
+            }
+        }
+
+        @keyframes drift2 {
+            from {
+                transform: translate(0, 0)
+            }
+
+            to {
+                transform: translate(-30px, -25px)
+            }
+        }
+
+        /* LEFT */
+        .hero-left {
+            position: relative;
+            z-index: 2;
+            animation: riseL .7s cubic-bezier(.22, 1, .36, 1) both;
+        }
+
+        .hero-eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: .55rem;
+            background: var(--amber-low);
+            border: 1px solid rgba(242, 169, 59, .22);
             border-radius: 50px;
-            font-size: 0.9rem;
+            padding: .32rem .9rem;
+            font-size: .8rem;
             font-weight: 600;
-            border: 1px solid var(--neon-accent);
+            color: var(--amber);
+            letter-spacing: .04em;
+            margin-bottom: 1.6rem;
+            animation: riseL .5s .1s cubic-bezier(.22, 1, .36, 1) both;
         }
 
-        .badge.ghost {
-            background: transparent;
-            border-color: var(--glass-border);
-            color: var(--text-muted);
+        .hero-eyebrow .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--amber);
+            box-shadow: 0 0 8px var(--amber);
+            animation: pdot 1.8s ease-in-out infinite;
         }
 
-        /* Buttons */
-        .buttons-container {
+        @keyframes pdot {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1)
+            }
+
+            50% {
+                opacity: .4;
+                transform: scale(.6)
+            }
+        }
+
+        .hero-title {
+            font-size: clamp(2.2rem, 5.1vw, 4rem);
+            line-height: 1.05;
+            font-weight: 800;
+            margin-bottom: 1.4rem;
+            perspective: 1000px;
+            animation: riseTitle .8s .15s cubic-bezier(.22, 1, .36, 1) both;
+        }
+
+        @keyframes riseTitle {
+            0% {
+                opacity: 0;
+                transform: translateY(40px) rotateX(-20deg);
+            }
+
+            100% {
+                opacity: 1;
+                transform: translateY(0) rotateX(0);
+            }
+        }
+
+        .line-accent {
+            display: block;
+            background: linear-gradient(100deg, var(--amber) 0%, #ffd27a 50%, var(--amber) 100%);
+            background-size: 200%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: shimtxt 4s linear infinite;
+        }
+
+        @keyframes shimtxt {
+            0% {
+                background-position: 200% center
+            }
+
+            100% {
+                background-position: -200% center
+            }
+        }
+
+        .hero-sub {
+            color: var(--muted2);
+            font-size: 1.08rem;
+            line-height: 1.75;
+            max-width: 480px;
+            margin-bottom: 2.4rem;
+            animation: riseL .6s .22s cubic-bezier(.22, 1, .36, 1) both;
+        }
+
+        .stat-row {
             display: flex;
-            gap: 1.5rem;
-            justify-content: center;
+            gap: 1.8rem;
+            margin-bottom: 2.6rem;
+            animation: riseL .6s .28s cubic-bezier(.22, 1, .36, 1) both;
+        }
+
+        .stat {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stat-num {
+            font-family: 'Syne', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--amber);
+        }
+
+        .stat-label {
+            font-size: .78rem;
+            color: var(--muted);
+            margin-top: .1rem;
+        }
+
+        .cta-row {
+            display: flex;
+            gap: .9rem;
             flex-wrap: wrap;
+            animation: riseL .6s .34s cubic-bezier(.22, 1, .36, 1) both;
         }
 
-        .btn {
-            display: flex;
+        .cta-primary {
+            display: inline-flex;
             align-items: center;
-            gap: 1rem;
-            text-decoration: none;
-            color: var(--text-main);
-            padding: 1rem 2rem;
+            gap: .7rem;
+            padding: .85rem 1.9rem;
+            background: var(--amber);
+            color: #0a0a09;
+            font-family: 'Syne', sans-serif;
+            font-weight: 700;
+            font-size: .95rem;
+            border: none;
             border-radius: 12px;
-            transition: all 0.3s ease;
+            cursor: pointer;
+            box-shadow: 0 4px 24px rgba(242, 169, 59, .35);
+            transition: all .25s;
+            position: relative;
+            overflow: hidden;
         }
 
-        .glass-btn {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--glass-border);
+        .cta-primary::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, .18) 50%, transparent 70%);
+            transform: translateX(-100%);
+            transition: transform .55s;
         }
 
-        .glass-btn:hover {
-            background: rgba(255, 255, 255, 0.1);
+        .cta-primary:hover::before {
+            transform: translateX(100%);
+        }
+
+        .cta-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(242, 169, 59, .45);
+        }
+
+        .cta-secondary {
+            display: inline-flex;
+            align-items: center;
+            gap: .7rem;
+            padding: .85rem 1.9rem;
+            background: var(--card);
+            color: var(--text);
+            font-family: 'Syne', sans-serif;
+            font-weight: 600;
+            font-size: .95rem;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            transition: all .25s;
+        }
+
+        .cta-secondary:hover {
+            border-color: rgba(255, 255, 255, .18);
+            background: rgba(255, 255, 255, .07);
             transform: translateY(-2px);
         }
 
-        .btn i {
-            font-size: 2rem;
+        .trust-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 1.4rem;
+            flex-wrap: wrap;
+            animation: riseL .6s .4s cubic-bezier(.22, 1, .36, 1) both;
         }
 
-        .btn-text {
+        .trust-badge {
+            display: flex;
+            align-items: center;
+            gap: .4rem;
+            font-size: .78rem;
+            color: var(--muted);
+        }
+
+        .trust-badge i {
+            color: var(--amber);
+            font-size: .8rem;
+        }
+
+        /* RIGHT — PHONE MOCKUP */
+        .hero-right {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            animation: riseR .75s .1s cubic-bezier(.22, 1, .36, 1) both;
+        }
+
+        .phone-wrap {
+            position: relative;
+            animation: float 6s ease-in-out infinite;
+            transform-style: preserve-3d;
+            transition: transform 0.15s ease-out;
+        }
+
+        @keyframes float {
+
+            0%,
+            100% {
+                transform: translateY(0) rotate(-1deg)
+            }
+
+            50% {
+                transform: translateY(-18px) rotate(1deg)
+            }
+        }
+
+        .phone-frame {
+            width: 240px;
+            height: 480px;
+            background: linear-gradient(155deg, #1c1c1a, #0f0f0e);
+            border-radius: 36px;
+            border: 1.5px solid rgba(255, 255, 255, .12);
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, .6), 0 40px 80px rgba(0, 0, 0, .7), inset 0 1px 0 rgba(255, 255, 255, .06);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .phone-notch {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 22px;
+            background: #0f0f0e;
+            border-radius: 0 0 14px 14px;
+            z-index: 5;
+        }
+
+        .phone-screen {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(180deg, #141410 0%, #0d0d0b 100%);
             display: flex;
             flex-direction: column;
-            text-align: left;
+            overflow: hidden;
         }
 
-        .btn-text span {
-            font-size: 0.8rem;
-            color: var(--text-muted);
+        .ps-banner {
+            height: 48%;
+            position: relative;
+            overflow: hidden;
+            flex-shrink: 0;
         }
 
-        /* Dynamic OS Highlight */
-        .btn.highlighted {
-            background: rgba(0, 240, 255, 0.15);
-            border-color: var(--neon-accent);
-            box-shadow: var(--neon-glow);
+        .ps-banner-bg {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, #3a1f08 0%, #1a0f04 40%, #0d0c0a 100%);
         }
 
-        .btn.disabled {
-            opacity: 0.5;
-            pointer-events: none;
-            filter: grayscale(100%);
+        .ps-banner-bg::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to bottom, transparent 40%, #141410 100%);
         }
 
-        /* Features */
-        .features {
+        .ps-poster {
+            position: absolute;
+            border-radius: 8px;
+        }
+
+        .ps-p1 {
+            width: 62px;
+            height: 90px;
+            top: 18px;
+            right: 18px;
+            transform: rotate(3deg);
+            background: linear-gradient(135deg, #3d1a08, #6b3512);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, .5);
+        }
+
+        .ps-p2 {
+            width: 52px;
+            height: 78px;
+            top: 28px;
+            right: 52px;
+            transform: rotate(-4deg);
+            background: linear-gradient(135deg, #1a1208, #2e2010);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, .5);
+        }
+
+        .ps-p3 {
+            width: 68px;
+            height: 98px;
+            top: 12px;
+            left: 16px;
+            transform: rotate(-2deg);
+            background: linear-gradient(135deg, #0e1a1e, #1a3040);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, .5);
+        }
+
+        .ps-play-btn {
+            position: absolute;
+            bottom: 14px;
+            left: 14px;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--amber);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 16px rgba(242, 169, 59, .5);
+        }
+
+        .ps-play-btn svg {
+            width: 12px;
+            height: 12px;
+            fill: #000;
+            margin-left: 2px;
+        }
+
+        .ps-now-playing {
+            position: absolute;
+            bottom: 14px;
+            left: 54px;
+        }
+
+        .ps-np-title {
+            font-size: 7px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: .04em;
+            font-family: 'Syne', sans-serif;
+        }
+
+        .ps-np-sub {
+            font-size: 6px;
+            color: rgba(255, 255, 255, .45);
+            margin-top: 2px;
+        }
+
+        .ps-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: rgba(255, 255, 255, .08);
+        }
+
+        .ps-progress-fill {
+            height: 100%;
+            width: 38%;
+            background: var(--amber);
+            box-shadow: 0 0 6px var(--amber);
+        }
+
+        .ps-body {
+            padding: 10px 10px 8px;
+            flex: 1;
+        }
+
+        .ps-section-label {
+            font-size: 7px;
+            font-weight: 700;
+            color: var(--amber);
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            font-family: 'Syne', sans-serif;
+        }
+
+        .ps-row {
+            display: flex;
+            gap: 7px;
+            margin-bottom: 10px;
+        }
+
+        .ps-card {
+            flex: 1;
+            border-radius: 8px;
+            overflow: hidden;
+            background: linear-gradient(135deg, #1a1814, #141210);
+            border: 1px solid rgba(255, 255, 255, .06);
+        }
+
+        .ps-card-img {
+            height: 46px;
+        }
+
+        .ps-ci-1 {
+            background: linear-gradient(135deg, #1e2a40, #0d1520);
+        }
+
+        .ps-ci-2 {
+            background: linear-gradient(135deg, #2a1510, #150a07);
+        }
+
+        .ps-ci-3 {
+            background: linear-gradient(135deg, #0f2015, #071008);
+        }
+
+        .ps-card-info {
+            padding: 4px 5px;
+        }
+
+        .ps-card-title {
+            font-size: 5.5px;
+            font-weight: 700;
+            color: #ddd;
+            font-family: 'Syne', sans-serif;
+        }
+
+        .ps-card-meta {
+            font-size: 5px;
+            color: rgba(255, 255, 255, .3);
+            margin-top: 1px;
+        }
+
+        .ps-pills {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .ps-pill {
+            padding: 2.5px 6px;
+            border-radius: 20px;
+            font-size: 5.5px;
+            font-weight: 600;
+            border: 1px solid rgba(255, 255, 255, .1);
+            color: rgba(255, 255, 255, .5);
+        }
+
+        .ps-pill.active {
+            background: var(--amber-mid);
+            border-color: rgba(242, 169, 59, .4);
+            color: var(--amber);
+        }
+
+        .ps-nav {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 36px;
+            background: rgba(12, 12, 11, .95);
+            border-top: 1px solid rgba(255, 255, 255, .05);
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            padding: 0 8px;
+        }
+
+        .ps-nav-ic {
+            font-size: 11px;
+            color: rgba(255, 255, 255, .3);
+        }
+
+        .ps-nav-ic.active {
+            color: var(--amber);
+        }
+
+        /* Floating badges */
+        .float-badge {
+            position: absolute;
+            background: rgba(18, 17, 15, .92);
+            border: 1px solid rgba(255, 255, 255, .1);
+            border-radius: 14px;
+            padding: .6rem .9rem;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, .4);
+            white-space: nowrap;
+        }
+
+        .fb-1 {
+            top: 10%;
+            left: -100px;
+            animation: fbob1 7s ease-in-out infinite;
+        }
+
+        .fb-2 {
+            bottom: 28%;
+            left: -90px;
+            animation: fbob2 9s ease-in-out infinite;
+        }
+
+        .fb-3 {
+            top: 18%;
+            right: -110px;
+            animation: fbob1 8s 1s ease-in-out infinite;
+        }
+
+        .fb-4 {
+            bottom: 18%;
+            right: -100px;
+            animation: fbob2 6s .5s ease-in-out infinite;
+        }
+
+        @keyframes fbob1 {
+
+            0%,
+            100% {
+                transform: translateY(0)
+            }
+
+            50% {
+                transform: translateY(-8px)
+            }
+        }
+
+        @keyframes fbob2 {
+
+            0%,
+            100% {
+                transform: translateY(0)
+            }
+
+            50% {
+                transform: translateY(8px)
+            }
+        }
+
+        .fb-inner {
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+        }
+
+        .fb-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            background: var(--amber-mid);
+            border: 1px solid rgba(242, 169, 59, .25);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--amber);
+            font-size: .85rem;
+        }
+
+        .fb-val {
+            font-family: 'Syne', sans-serif;
+            font-size: .92rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .fb-lbl {
+            font-size: .68rem;
+            color: var(--muted);
+            margin-top: .05rem;
+        }
+
+        .fb-stars {
+            display: flex;
+            gap: 1px;
+            margin-top: 2px;
+        }
+
+        .fb-stars i {
+            font-size: .5rem;
+            color: var(--amber);
+        }
+
+        @keyframes riseL {
+            from {
+                opacity: 0;
+                transform: translateX(-30px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0)
+            }
+        }
+
+        @keyframes riseR {
+            from {
+                opacity: 0;
+                transform: translateX(30px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0)
+            }
+        }
+
+        /* ══════════════════════
+           SHARED SECTION STYLES
+        ══════════════════════ */
+        section {
             padding: 5rem 5%;
-            text-align: center;
+            position: relative;
+            z-index: 1;
         }
 
-        .section-title {
-            font-size: 2.5rem;
+        .section-header {
+            text-align: center;
             margin-bottom: 3rem;
         }
 
-        .feature-grid {
+        .section-header h2 {
+            font-size: clamp(1.8rem, 3.5vw, 2.8rem);
+        }
+
+        .section-header p {
+            color: var(--muted);
+            margin-top: .6rem;
+            font-size: 1rem;
+        }
+
+        .amber {
+            color: var(--amber);
+            text-shadow: 0 0 20px rgba(242, 169, 59, .3);
+        }
+
+        .card {
+            background: var(--card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 2.5rem;
+            transition: transform .3s ease, border-color .3s ease, box-shadow .3s ease;
+            position: relative;
+            overflow: hidden;
+            transform-style: preserve-3d;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(600px circle at var(--mouse-x, -500px) var(--mouse-y, -500px), rgba(242, 169, 59, 0.06), transparent 40%);
+            z-index: 0;
+            pointer-events: none;
+            transition: opacity .3s ease;
+            opacity: 0;
+        }
+
+        .card:hover::before {
+            opacity: 1;
+        }
+
+        .card>* {
+            position: relative;
+            z-index: 1;
+            transform: translateZ(10px);
+        }
+
+        .card:hover {
+            border-color: rgba(242, 169, 59, .25);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, .4), inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+        }
+
+        .feat-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.5rem;
+            perspective: 1000px;
         }
 
-        .feature-card i {
-            font-size: 3rem;
-            margin-bottom: 1.5rem;
+        .feat-card {
+            text-align: center;
+            padding: 2rem;
+            transition: transform .4s cubic-bezier(.22, 1, .36, 1);
+            transform-style: preserve-3d;
         }
 
-        /* Changelog Section */
-        .changelog-section {
-            padding: 5rem 5%;
+        .feat-card:hover {
+            transform: translateY(-12px) scale(1.02) rotateX(2deg) rotateY(2deg);
+            z-index: 10;
+        }
+
+        .feat-card i {
+            font-size: 2.3rem;
+            color: var(--amber);
+            margin-bottom: 1rem;
+            display: block;
+            transition: transform .4s cubic-bezier(.175, .885, .32, 1.275);
+        }
+
+        .feat-card:hover i {
+            transform: scale(1.15) translateZ(30px);
+            text-shadow: 0 10px 20px rgba(242, 169, 59, 0.4);
+        }
+
+        .feat-card h3 {
+            font-size: 1.05rem;
+            margin-bottom: .5rem;
+        }
+
+        .feat-card p {
+            color: var(--muted);
+            font-size: .88rem;
+            line-height: 1.65;
+        }
+
+        .ott-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            max-width: 860px;
+            margin: 0 auto;
+        }
+
+        .ott-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 1.2rem 1.4rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: border-color .2s;
+        }
+
+        .ott-card:hover {
+            border-color: rgba(242, 169, 59, .3);
+        }
+
+        .ott-card .name {
+            font-weight: 600;
+            font-size: .93rem;
+        }
+
+        .ott-card .desc {
+            color: var(--muted);
+            font-size: .77rem;
+            margin-top: .15rem;
+        }
+
+        .ott-card img {
+            width: 28px;
+            height: 28px;
+            object-fit: contain;
+            filter: brightness(0.9) contrast(1.1);
+            transition: transform .3s ease;
+        }
+
+        .ott-card:hover img {
+            transform: scale(1.1);
+            filter: brightness(1) contrast(1.2) drop-shadow(0 0 8px rgba(242, 169, 59, 0.4));
+        }
+
+        .pill-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .7rem;
+            justify-content: center;
+            margin-top: 1.5rem;
+        }
+
+        .pill {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 50px;
+            padding: .42rem 1.05rem;
+            font-size: .83rem;
+            color: var(--text);
+            transition: all .2s;
+            cursor: default;
+        }
+
+        .pill:hover {
+            border-color: rgba(242, 169, 59, .4);
+            color: var(--amber);
+        }
+
+        .sport-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.5rem;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .sport-card {
+            text-align: center;
+        }
+
+        .sport-card i {
+            font-size: 2.8rem;
+            color: var(--amber);
+            margin-bottom: .8rem;
+            display: block;
+        }
+
+        .sport-card h3 {
+            margin-bottom: .4rem;
+        }
+
+        .sport-card p {
+            color: var(--muted);
+            font-size: .87rem;
+            line-height: 1.6;
+        }
+
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .info-table tr {
+            transition: background .2s;
+        }
+
+        .info-table tr:hover {
+            background: rgba(242, 169, 59, .03);
+        }
+
+        .info-table td {
+            padding: 1rem 1.4rem;
+            border-bottom: 1px solid var(--border);
+            font-size: .93rem;
+        }
+
+        .info-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .info-table td:first-child {
+            font-weight: 600;
+            color: var(--amber);
+            width: 38%;
+            text-transform: uppercase;
+            font-size: .78rem;
+            letter-spacing: .06em;
+        }
+
+        .cmp-wrap {
+            overflow-x: auto;
             max-width: 900px;
             margin: 0 auto;
         }
 
-        .markdown-body {
+        .cmp-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .cmp-table th {
+            padding: 1rem 1.3rem;
             text-align: left;
-            color: var(--text-muted);
-            line-height: 1.6;
-            margin-top: 2rem;
+            background: rgba(242, 169, 59, .07);
+            color: var(--amber);
+            font-family: 'Syne', sans-serif;
+            font-size: .82rem;
+            letter-spacing: .05em;
+            border-bottom: 2px solid rgba(242, 169, 59, .18);
         }
 
-        .markdown-body h1, .markdown-body h2, .markdown-body h3 {
-            color: var(--text-main);
-            margin: 1.5rem 0 1rem;
+        .cmp-table td {
+            padding: .9rem 1.3rem;
+            border-bottom: 1px solid var(--border);
+            font-size: .88rem;
         }
 
-        .markdown-body ul {
-            margin-left: 2rem;
-            margin-bottom: 1rem;
+        .cmp-table tr:hover td {
+            background: rgba(242, 169, 59, .025);
         }
 
-        .skeleton-loader {
-            height: 20px;
-            background: linear-gradient(90deg, var(--glass-bg) 25%, rgba(255,255,255,0.1) 50%, var(--glass-bg) 75%);
-            background-size: 200% 100%;
-            animation: loading 1.5s infinite;
+        .cmp-table td:first-child {
+            font-weight: 600;
+            color: var(--amber);
+        }
+
+        .pc-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .pc-card h3 {
+            font-size: 1.25rem;
+            margin-bottom: 1.2rem;
+        }
+
+        .pc-card.pros h3 {
+            color: #4ade80;
+        }
+
+        .pc-card.cons h3 {
+            color: #f87171;
+        }
+
+        .pc-list {
+            list-style: none;
+        }
+
+        .pc-list li {
+            padding: .6rem 0 .6rem 1.4rem;
+            border-bottom: 1px solid var(--border);
+            font-size: .88rem;
+            color: var(--muted);
+            position: relative;
+            line-height: 1.5;
+        }
+
+        .pc-list li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+        }
+
+        .pc-card.pros .pc-list li::before {
+            background: #4ade80;
+            box-shadow: 0 0 6px rgba(74, 222, 128, .5);
+        }
+
+        .pc-card.cons .pc-list li::before {
+            background: #f87171;
+            box-shadow: 0 0 6px rgba(248, 113, 113, .4);
+        }
+
+        .pc-list li:last-child {
+            border-bottom: none;
+        }
+
+        .faq-wrap {
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        details {
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 0;
+        }
+
+        summary {
+            cursor: pointer;
+            font-weight: 600;
+            font-size: .93rem;
+            list-style: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        summary::after {
+            content: '+';
+            font-size: 1.3rem;
+            color: var(--amber);
+        }
+
+        details[open] summary::after {
+            content: '−';
+        }
+
+        details p {
+            color: var(--muted);
+            font-size: .88rem;
+            line-height: 1.75;
+            margin-top: .75rem;
+            padding-right: 1rem;
+        }
+
+        .review-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.4rem;
+        }
+
+        .review-card {
+            padding: 1.8rem;
+        }
+
+        .stars {
+            display: flex;
+            gap: 3px;
+            margin-bottom: .8rem;
+        }
+
+        .stars i {
+            font-size: .75rem;
+            color: var(--amber);
+        }
+
+        .review-text {
+            color: var(--muted);
+            font-size: .88rem;
+            line-height: 1.7;
+            font-style: italic;
+        }
+
+        .review-author {
+            margin-top: 1rem;
+            font-weight: 600;
+            font-size: .82rem;
+            color: var(--muted2);
+        }
+
+        /* ── DOWNLOAD VIEW ── */
+        .dl-hero {
+            min-height: 62vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4rem 5%;
+            text-align: center;
+        }
+
+        .dl-inner {
+            max-width: 680px;
+        }
+
+        .dl-inner h1 {
+            font-size: clamp(2rem, 4vw, 3rem);
+            margin: 1rem 0 .5rem;
+        }
+
+        .info-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            background: var(--amber-low);
+            border: 1px solid rgba(242, 169, 59, .22);
+            border-radius: 50px;
+            padding: .3rem .85rem;
+            font-size: .78rem;
+            font-weight: 600;
+            color: var(--amber);
+        }
+
+        .ghost-chip {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            border-radius: 50px;
+            padding: .3rem .85rem;
+            font-size: .78rem;
+            display: inline-block;
+        }
+
+        .chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .6rem;
+            justify-content: center;
+            margin-bottom: 1.8rem;
+        }
+
+        .loading-txt {
+            color: var(--muted);
+            margin-bottom: 1.2rem;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: .9rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .dl-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: .7rem;
+            padding: .85rem 1.8rem;
+            border-radius: 12px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-family: 'Syne', sans-serif;
+            font-size: .93rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all .25s;
+            cursor: pointer;
+        }
+
+        .dl-btn:hover {
+            background: rgba(255, 255, 255, .07);
+            transform: translateY(-2px);
+        }
+
+        .dl-btn.hi {
+            background: var(--amber-mid);
+            border-color: rgba(242, 169, 59, .4);
+            color: var(--amber);
+            box-shadow: 0 0 20px rgba(242, 169, 59, .2);
+        }
+
+        .dl-btn.disabled {
+            opacity: .35;
+            pointer-events: none;
+            filter: grayscale(1);
+        }
+
+        .skeleton {
+            height: 16px;
+            background: linear-gradient(90deg, var(--card) 25%, rgba(255, 255, 255, .06) 50%, var(--card) 75%);
+            background-size: 200%;
+            animation: shimmer 1.5s infinite;
             border-radius: 4px;
-            margin-bottom: 10px;
-        }
-        .skeleton-loader.short { width: 60%; }
-
-        @keyframes loading {
-            0% { background-position: 200% 0; }
-            100% { background-position: -200% 0; }
+            margin-bottom: 9px;
         }
 
-        @media (max-width: 768px) {
-            .hero-content h1 { font-size: 2.5rem; }
-            .buttons-container { flex-direction: column; }
-            .nav-links { display: none; }
+        .skeleton.s {
+            width: 55%;
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: 200%
+            }
+
+            100% {
+                background-position: -200%
+            }
+        }
+
+        .changelog-wrap {
+            max-width: 820px;
+            margin: 0 auto;
+            padding: 0 5% 5rem;
+        }
+
+        #changelog-content {
+            color: var(--muted);
+            line-height: 1.8;
+            font-size: .91rem;
+            margin-top: 1rem;
+        }
+
+        #changelog-content h1,
+        #changelog-content h2,
+        #changelog-content h3 {
+            color: var(--text);
+            margin: 1.2rem 0 .5rem;
+        }
+
+        #changelog-content ul {
+            margin-left: 1.5rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2.5rem 5%;
+            border-top: 1px solid var(--border);
+            color: var(--muted);
+            font-size: .83rem;
+        }
+
+        footer span {
+            color: var(--amber);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        @media(max-width:900px) {
+            .hero {
+                grid-template-columns: 1fr;
+                min-height: auto;
+                padding: 4rem 5% 3rem;
+                text-align: center;
+            }
+
+            .hero-left {
+                align-items: center;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .hero-sub {
+                margin: 0 auto 2rem;
+            }
+
+            .stat-row {
+                justify-content: center;
+            }
+
+            .cta-row {
+                justify-content: center;
+            }
+
+            .trust-row {
+                justify-content: center;
+            }
+
+            .hero-right {
+                display: none;
+            }
+
+            .pc-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .nav-links {
+                display: none;
+            }
         }
     </style>
 </head>
+
 <body>
-    <!-- Particle Background -->
     <div id="particles-js"></div>
 
-    <!-- Navigation -->
-    <nav class="glass-nav">
-        <div class="logo">
-            <span class="neon-text">LUMINO</span>
-        </div>
+    <!-- NAV -->
+    <nav>
+        <div class="logo" onclick="show('home')">LUMINO</div>
         <div class="nav-links">
-            <a href="#features">Features</a>
-            <a href="#changelog-section">What's New</a>
-            <a href="#faq">FAQ</a>
+            <a id="n-home" class="active" onclick="show('home')">Home</a>
+            <a
+                onclick="show('home');setTimeout(()=>document.getElementById('features').scrollIntoView({behavior:'smooth'}),80)">Features</a>
+            <a
+                onclick="show('home');setTimeout(()=>document.getElementById('library').scrollIntoView({behavior:'smooth'}),80)">Library</a>
+            <a id="n-download" onclick="show('download')" class="nav-cta">Download</a>
         </div>
     </nav>
 
-    <!-- Hero Section -->
-    <header class="hero">
-        <div class="hero-content glass-card">
-            <div class="badge-container">
-                <span class="badge" id="version-badge">Fetching latest...</span>
-                <span class="badge ghost" id="date-badge">--/--/----</span>
+    <!-- ════ HOME VIEW ════ -->
+    <div id="view-home">
+
+        <!-- ★ HERO ★ -->
+        <header class="hero">
+            <div class="orb orb-1"></div>
+            <div class="orb orb-2"></div>
+            <div class="orb orb-3"></div>
+
+            <!-- LEFT TEXT -->
+            <div class="hero-left">
+                <div class="hero-eyebrow"><span class="dot"></span>v3.2 · Now Available · Free Forever</div>
+                <h1 class="hero-title">
+                    Stream Everything.<br>
+                    <span class="line-accent">Own Nothing. Pay Nothing.</span>
+                </h1>
+                <p class="hero-sub">One app for movies, TV shows and anime — up to 4K HDR, zero ads, zero cost.</p>
+
+                <div class="cta-row">
+                    <button onclick="show('download')" class="cta-primary"><i class="fas fa-download"></i>Download
+                        Free</button>
+                    <button onclick="document.getElementById('features').scrollIntoView({behavior:'smooth'})"
+                        class="cta-secondary"><i class="fas fa-play"></i>See Features</button>
+                </div>
+                <div class="trust-row">
+                    <span class="trust-badge"><i class="fas fa-shield-alt"></i> No malware</span>
+
+                    <span class="trust-badge"><i class="fas fa-ban"></i> Zero ads</span>
+                </div>
             </div>
-            <h1>Your Ultimate <span class="neon-text">Cinematic</span> Experience.</h1>
-            <p>Stream your favorite movies with a beautiful custom interface and an advanced video player. Now available cross-platform.</p>
-            
-            <div class="download-actions" id="download-actions">
-                <!-- Loading State -->
-                <p id="loading-text"><i class="fas fa-circle-notch fa-spin"></i> Fetching releases from GitHub...</p>
-                
-                <div class="buttons-container" style="display: none;" id="btn-container">
-                    <a href="#" id="btn-android" class="btn glass-btn">
-                        <i class="fab fa-android"></i>
-                        <div class="btn-text">
-                            <span>Download for</span>
-                            <strong>Android (.apk)</strong>
+
+            <!-- RIGHT PHONE MOCKUP -->
+            <div class="hero-right">
+                <div class="float-badge fb-1">
+                    <div class="fb-inner">
+                        <div class="fb-icon"><i class="fas fa-photo-video"></i></div>
+                        <div>
+                            <div class="fb-val">4K HDR</div>
+                            <div class="fb-lbl">Ultra quality</div>
                         </div>
-                    </a>
-                    <a href="#" id="btn-windows" class="btn glass-btn">
-                        <i class="fab fa-windows"></i>
-                        <div class="btn-text">
-                            <span>Download for</span>
-                            <strong>Windows (.exe)</strong>
+                    </div>
+                </div>
+                <div class="float-badge fb-2">
+                    <div class="fb-inner">
+                        <div class="fb-icon"><i class="fas fa-download"></i></div>
+                        <div>
+                            <div class="fb-val">Offline</div>
+                            <div class="fb-lbl">Watch anytime</div>
                         </div>
-                    </a>
+                    </div>
+                </div>
+                <div class="float-badge fb-3">
+                    <div class="fb-inner">
+                        <div class="fb-icon"><i class="fas fa-star"></i></div>
+                        <div>
+                            <div class="fb-val">4.9 / 5</div>
+                            <div class="fb-stars"><i class="fas fa-star"></i><i class="fas fa-star"></i><i
+                                    class="fas fa-star"></i><i class="fas fa-star"></i><i
+                                    class="fas fa-star-half-alt"></i></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="float-badge fb-4">
+                    <div class="fb-inner">
+                        <div class="fb-icon"><i class="fas fa-ban"></i></div>
+                        <div>
+                            <div class="fb-val">0 Ads</div>
+                            <div class="fb-lbl">Ad-free always</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="phone-wrap">
+                    <div class="phone-frame">
+                        <div class="phone-notch"></div>
+                        <div class="phone-screen">
+                            <div class="ps-banner">
+                                <div class="ps-banner-bg"></div>
+                                <div class="ps-poster ps-p3"></div>
+                                <div class="ps-poster ps-p2"></div>
+                                <div class="ps-poster ps-p1"></div>
+                                <div class="ps-play-btn"><svg viewBox="0 0 10 12">
+                                        <polygon points="0,0 10,6 0,12" />
+                                    </svg></div>
+                                <div class="ps-now-playing">
+                                    <div class="ps-np-title">NOW PLAYING</div>
+                                    <div class="ps-np-sub">Interstellar · 2024 · 4K HDR</div>
+                                </div>
+                                <div class="ps-progress">
+                                    <div class="ps-progress-fill"></div>
+                                </div>
+                            </div>
+                            <div class="ps-body">
+                                <div class="ps-pills" style="margin-bottom:8px;">
+                                    <span class="ps-pill active">All</span><span class="ps-pill">Movies</span><span
+                                        class="ps-pill">Series</span><span class="ps-pill">Anime</span><span
+                                        class="ps-pill">Sports</span>
+                                </div>
+                                <div class="ps-section-label">Trending Now</div>
+                                <div class="ps-row">
+                                    <div class="ps-card">
+                                        <div class="ps-card-img ps-ci-1"></div>
+                                        <div class="ps-card-info">
+                                            <div class="ps-card-title">Dune: Part 3</div>
+                                            <div class="ps-card-meta">Sci-Fi · 4K</div>
+                                        </div>
+                                    </div>
+                                    <div class="ps-card">
+                                        <div class="ps-card-img ps-ci-2"></div>
+                                        <div class="ps-card-info">
+                                            <div class="ps-card-title">The Batman</div>
+                                            <div class="ps-card-meta">Action · HD</div>
+                                        </div>
+                                    </div>
+                                    <div class="ps-card">
+                                        <div class="ps-card-img ps-ci-3"></div>
+                                        <div class="ps-card-info">
+                                            <div class="ps-card-title">Shogun S2</div>
+                                            <div class="ps-card-meta">Drama · 4K</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="ps-section-label">Live Sports</div>
+                                <div class="ps-row">
+                                    <div class="ps-card" style="background:linear-gradient(135deg,#0f1a0a,#1a3012)">
+                                        <div class="ps-card-img"
+                                            style="background:linear-gradient(135deg,#1a3012,#0f2008);display:flex;align-items:center;justify-content:center">
+                                            <span style="font-size:16px">⚽</span></div>
+                                        <div class="ps-card-info">
+                                            <div class="ps-card-title">EPL Live</div>
+                                            <div class="ps-card-meta" style="color:#f2a93b;font-weight:600">● LIVE</div>
+                                        </div>
+                                    </div>
+                                    <div class="ps-card" style="background:linear-gradient(135deg,#0a0f1a,#121830)">
+                                        <div class="ps-card-img"
+                                            style="background:linear-gradient(135deg,#121830,#0a0f1a);display:flex;align-items:center;justify-content:center">
+                                            <span style="font-size:16px">🏏</span></div>
+                                        <div class="ps-card-info">
+                                            <div class="ps-card-title">IPL 2025</div>
+                                            <div class="ps-card-meta" style="color:#f2a93b;font-weight:600">● LIVE</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="ps-nav">
+                                <i class="fas fa-home ps-nav-ic active"></i>
+                                <i class="fas fa-search ps-nav-ic"></i>
+                                <i class="fas fa-download ps-nav-ic"></i>
+                                <i class="fas fa-user ps-nav-ic"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+
+
+        <!-- FEATURES -->
+        <section id="features">
+            <div class="section-header">
+                <h2>Exclusive <span class="amber">Features</span></h2>
+                <p>Engineered for the ultimate binge-watching experience.</p>
+            </div>
+            <div class="feat-grid">
+                <div class="feat-card card">
+                    <i class="fas fa-film"></i>
+                    <h3>HD & 4K Video</h3>
+                    <p>Choose from 480p to 4K HDR. Crystal-clear playback adapts to any screen size automatically.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-wifi"></i>
+                    <h3>Zero Buffering</h3>
+                    <p>Smart server optimization automatically adjusts quality when your connection slows — no
+                        interruptions.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-ban"></i>
+                    <h3>No Ads, Ever</h3>
+                    <p>Watch your entire movie without a single popup or pre-roll interruption. Completely ad-free.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-bolt"></i>
+                    <h3>Fast Loading</h3>
+                    <p>Lightweight APK runs smoothly on older devices too. No lag, no waiting for long load screens.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-sliders-h"></i>
+                    <h3>Simple, Clean UI</h3>
+                    <p>Minimalist dark and light mode interface. Every category neatly organized for instant access.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-brain"></i>
+                    <h3>Smart Recommendations</h3>
+                    <p>Personalized algorithm tracks watch history and surfaces content you'll actually want to see.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-download"></i>
+                    <h3>Offline Downloads</h3>
+                    <p>Save any movie or episode directly to your device and watch without an internet connection.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-desktop"></i>
+                    <h3>Multi-Device Support</h3>
+                    <p>Works on Android, PC, iPhone, Fire TV, Android TV, Smart TV, and Mac tablets seamlessly.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-sync-alt"></i>
+                    <h3>Daily Updates</h3>
+                    <p>Fresh content added every day. Latest blockbusters and episodes available the moment they drop.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- OTT PLATFORMS -->
+        <section>
+            <div class="section-header">
+                <h2>Integrated <span class="amber">OTT Platforms</span></h2>
+                <p>Access content from all major streaming services in one place.</p>
+            </div>
+            <div class="ott-grid">
+                <div class="ott-card">
+                    <div>
+                        <div class="name">Netflix</div>
+                        <div class="desc">Originals & Movies</div>
+                    </div>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/75/Netflix_icon.svg/960px-Netflix_icon.svg.png?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=thumbnail&_=20220806170125" alt="Netflix">
+                </div>
+                <div class="ott-card">
+                    <div>
+                        <div class="name">Prime Video</div>
+                        <div class="desc">Amazon Originals</div>
+                    </div>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/43/Amazon_Prime_Video_logo_%282022%29.svg/960px-Amazon_Prime_Video_logo_%282022%29.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail" alt="Prime Video">
+                </div>
+                <div class="ott-card">
+                    <div>
+                        <div class="name">Disney+</div>
+                        <div class="desc">Disney, Marvel</div>
+                    </div>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/Disney%2B_logo.svg/960px-Disney%2B_logo.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail" alt="Disney+">
+                </div>
+                <div class="ott-card">
+                    <div>
+                        <div class="name">Sony LIV</div>
+                        <div class="desc">Indian Shows, Sports</div>
+                    </div>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f7/SonyLIV_2020.png/960px-SonyLIV_2020.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail" alt="Sony LIV">
+                </div>
+                <div class="ott-card">
+                    <div>
+                        <div class="name">Zee5</div>
+                        <div class="desc">Regional Indian</div>
+                    </div>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/6/6e/ZEE5_2025.svg/960px-ZEE5_2025.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail" alt="Zee5">
+                </div>
+                <div class="ott-card">
+                    <div>
+                        <div class="name">JioHotstar</div>
+                        <div class="desc">Free Movies, Sports</div>
+                    </div>
+                    <img src="https://pnghdpro.com/wp-content/themes/pnghdpro/download/social-media-and-brands/jiohotstar-logo.png" alt="JioHotstar">
+                </div>
+                <div class="ott-card">
+                    <div>
+                        <div class="name">MX Player</div>
+                        <div class="desc">Free Video Content</div>
+                    </div>
+                    <img src="https://archive.org/download/mx-player-logo-450x450/mx-player-logo-450x450.png" alt="MX Player">
+                </div>
+                <div class="ott-card">
+                    <div>
+                        <div class="name">Hoichoi</div>
+                        <div class="desc">Bengali Series</div>
+                    </div>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/b/b0/Hoichoi-720p-transperant.png?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=thumbnail_unscaled&_=20190420063217" alt="Hoichoi">
+                </div>
+            </div>
+        </section>
+
+        <!-- Genre Pills -->
+        <div style="text-align:center;margin-top:3rem;">
+            <h3 style="margin-bottom:1.2rem;font-family:'Syne',sans-serif;">Browse by <span class="amber">Genre</span>
+            </h3>
+            <div class="pill-grid">
+                <span class="pill">⚔️ Action</span>
+                <span class="pill">😂 Comedy</span>
+                <span class="pill">💕 Romance</span>
+                <span class="pill">🔍 Crime</span>
+                <span class="pill">🗺️ Adventure</span>
+                <span class="pill">😱 Thriller</span>
+                <span class="pill">👻 Horror</span>
+                <span class="pill">🚀 Sci-Fi</span>
+                <span class="pill">🎭 Drama</span>
+                <span class="pill">🧸 Kids</span>
+            </div>
+        </div>
+        </section>
+
+        <!-- CONTENT LIBRARY -->
+        <section id="library" style="margin-top: 5rem;">
+            <div class="section-header">
+                <h2>Diverse <span class="amber">Content Library</span></h2>
+                <p>Something for every age, every mood, every moment.</p>
+            </div>
+            <div class="feat-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+                <div class="feat-card card">
+                    <i class="fas fa-film"></i>
+                    <h3>Movies</h3>
+                    <p>Hollywood, Bollywood, mollywood. All-time box office hits, midnight horror, Marvel & DC.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-tv"></i>
+                    <h3>TV Series</h3>
+                    <p>Korean dramas, English and other languages Tv shows</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-dragon"></i>
+                    <h3>Anime</h3>
+                    <p>Must-watch titles, latest seasonal releases, popular classics all in one section.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-baby"></i>
+                    <h3>Cartoons</h3>
+                    <p>US animations, Netflix cartoon movies, educational content for kids.</p>
+                </div>
+
+                <div class="feat-card card">
+                    <i class="fas fa-mobile-alt"></i>
+                    <h3>ShortTV</h3>
+                    <p>Short series: Top Picks, CEO stories, Hidden Identity — new content added daily.</p>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- KEY FEATURES -->
+        <section>
+            <div class="section-header">
+                <h2>More <span class="amber">Key Features</span></h2>
+                <p>Details that make Lumino stand apart from every other streaming app.</p>
+            </div>
+            <div class="feat-grid">
+
+                <div class="feat-card card">
+                    <i class="fas fa-closed-captioning"></i>
+                    <h3>Built-in Subtitles</h3>
+                    <p>Subtitles for Turkish dramas, anime, Nollywood content. Toggle in one tap during playback.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-moon"></i>
+                    <h3>Dark Mode</h3>
+                    <p>Reduces eye strain and consumes less battery. Perfect for late-night movie sessions.</p>
+                </div>
+                <div class="feat-card card">
+                    <i class="fas fa-history"></i>
+                    <h3>Resume Playback</h3>
+                    <p>Leave mid-movie and come back exactly where you stopped. No manual seeking needed.</p>
+                </div>
+
+                <div class="feat-card card">
+                    <i class="fas fa-list"></i>
+                    <h3>Watchlist</h3>
+                    <p>Bookmark movies and series instantly. Build your personal queue and watch when ready.</p>
+                </div>
+
+
+            </div>
+        </section>
+
+
+
+
+        <!-- COMPARISON -->
+        <section>
+            <div class="section-header">
+                <h2>How Lumino <span class="amber">Compares</span></h2>
+                <p>See why you should choose Lumino over paid alternatives.</p>
+            </div>
+            <div class="card" style="overflow-x:auto;max-width:900px;margin:0 auto;">
+                <table class="cmp-table">
+                    <thead>
+                        <tr>
+                            <th>Feature</th>
+                            <th>Lumino</th>
+                            <th>Netflix</th>
+                            <th>Hulu</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Cost</td>
+                            <td>Completely free</td>
+                            <td>Monthly subscription</td>
+                            <td>Monthly subscription</td>
+                        </tr>
+                        <tr>
+                            <td>Ads</td>
+                            <td>Zero ads</td>
+                            <td>Ad-supported plans</td>
+                            <td>Ad-supported plan</td>
+                        </tr>
+                        <tr>
+                            <td>Login Required</td>
+                            <td>No sign-up needed</td>
+                            <td>Account required</td>
+                            <td>Account required</td>
+                        </tr>
+                        <tr>
+                            <td>Offline Viewing</td>
+                            <td>Free download</td>
+                            <td>Download on paid plan</td>
+                            <td>Download on plans</td>
+                        </tr>
+                        <tr>
+                            <td>Video Quality</td>
+                            <td>Up to 4K HDR</td>
+                            <td>4K on premium plan</td>
+                            <td>4K on some plans</td>
+                        </tr>
+                        <tr>
+                            <td>Device Support</td>
+                            <td>Android, iOS, PC, TV</td>
+                            <td>All major platforms</td>
+                            <td>All major platforms</td>
+                        </tr>
+
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- PROS / CONS -->
+        <section>
+            <div class="section-header">
+                <h2>Pros & <span class="amber">Cons</span></h2>
+                <p>Full transparency before you install.</p>
+            </div>
+            <div class="pc-grid" style="max-width:900px;margin:0 auto;">
+                <div class="pc-card pros card">
+                    <h3>Pros</h3>
+                    <ul class="pc-list">
+                        <li>Completely free — no subscription fees</li>
+                        <li>No ads or mid-stream interruptions</li>
+                        <li>Works on Android, iOS, PC, Smart TV</li>
+                        <li>Up to 4K HDR video quality</li>
+                        <li>Download content for offline playback</li>
+                        <li>Built-in subtitles and media player</li>
+                        <li>Daily content updates and bug fixes</li>
+                    </ul>
+                </div>
+                <div class="pc-card cons card">
+                    <h3>Cons</h3>
+                    <ul class="pc-list">
+                        <li>Not available on Google Play Store</li>
+                        <li>Not officially licensed by OTT platforms</li>
+                        <li>No dedicated parental controls</li>
+                        <li>Content availability may vary by region</li>
+                        <li>No official customer support channel</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- FAQ -->
+        <section>
+            <div class="section-header">
+                <h2>Frequently Asked <span class="amber">Questions</span></h2>
+            </div>
+            <div class="faq-wrap card">
+                <details open>
+                    <summary>How do I watch movies on Lumino?</summary>
+                    <p>No sign-in needed. Download the APK, install, open the app and start streaming instantly. You can
+                        also download content for offline viewing later.</p>
+                </details>
+                <details>
+                    <summary>Is Lumino safe to install?</summary>
+                    <p>Yes — the APK is clean with no malware or spyware. Always download from this website or a trusted
+                        source. Enable Unknown Sources in your Android settings before installing.</p>
+                </details>
+                <details>
+                    <summary>Why is it not on the Play Store?</summary>
+                    <p>Third-party streaming APKs are not permitted on the Play Store. You can only download Lumino
+                        directly from our website. Always check the version number before installing.</p>
+                </details>
+                <details>
+                    <summary>Can I watch offline?</summary>
+                    <p>Yes. Use the download button on any movie or episode. Content saves to your lumino app and can be
+                        watched without any internet connection.</p>
+                </details>
+                <details>
+                    <summary>Which devices are supported?</summary>
+                    <p>Android phones & tablets, PC, iPhone/iPad, Android TV</p>
+                </details>
+                <details>
+                    <summary>Is Lumino really free?</summary>
+                    <p>100% free. No subscription, no hidden charges, no trial period. Premium features are fully
+                        unlocked including 4K, offline downloads and ad-free playback.</p>
+                </details>
+            </div>
+        </section>
+
+    </div><!-- /view-home -->
+
+    <!-- ════ DOWNLOAD VIEW ════ -->
+    <div id="view-download" class="hidden">
+        <header class="dl-hero">
+            <div class="dl-inner">
+                <div class="chip-row">
+                    <span class="info-chip" id="ver-badge"><i class="fas fa-tag"></i> Loading…</span>
+                    <span class="ghost-chip" id="date-badge">—</span>
+                </div>
+                <h1 style="font-family:'Syne',sans-serif">Download <span class="amber">Lumino</span></h1>
+                <p style="color:var(--muted);margin:.6rem 0 2rem">Free, always up to date. Pick your platform below.</p>
+                <div id="loading-txt" class="loading-txt"><i class="fas fa-circle-notch fa-spin"></i> Fetching latest
+                    release…</div>
+                <div class="btn-row" id="btn-container" style="display:none">
+                    <a href="#" id="btn-android" class="dl-btn"><i class="fab fa-android"
+                            style="font-size:1.7rem"></i><span style="text-align:left"><span
+                                style="font-size:.75rem;color:var(--muted)">Download for</span><br><strong>Android
+                                (.apk)</strong></span></a>
+                    <a href="#" id="btn-windows" class="dl-btn"><i class="fab fa-windows"
+                            style="font-size:1.7rem"></i><span style="text-align:left"><span
+                                style="font-size:.75rem;color:var(--muted)">Download for</span><br><strong>Windows
+                                (.exe)</strong></span></a>
+                </div>
+            </div>
+        </header>
+
+        <section style="padding-top:0">
+            <div class="section-header">
+                <h2>App <span class="amber">Specifications</span></h2>
+            </div>
+            <div class="card" style="max-width:720px;margin:0 auto">
+                <table class="info-table">
+                    <tbody>
+                        <tr>
+                            <td>App Name</td>
+                            <td>Lumino</td>
+                        </tr>
+                        <tr>
+                            <td>Latest Version</td>
+                            <td id="spec-ver">Loading…</td>
+                        </tr>
+                        <tr>
+                            <td>Last Updated</td>
+                            <td id="spec-date">Loading…</td>
+                        </tr>
+                        <tr>
+                            <td>File Size</td>
+                            <td id="spec-size">~62 MB</td>
+                        </tr>
+                        <tr>
+                            <td>Category</td>
+                            <td>Entertainment</td>
+                        </tr>
+                        <tr>
+                            <td>License</td>
+                            <td>Free · No Ads · Premium Unlocked</td>
+                        </tr>
+                        <tr>
+                            <td>Compatibility</td>
+                            <td>Android 5.0+ / Windows 10+</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <div class="changelog-wrap">
+            <div class="card">
+                <h2>Release Notes <span class="amber" id="cl-ver"></span></h2>
+                <div id="changelog-content">
+                    <div class="skeleton"></div>
+                    <div class="skeleton s"></div>
+                    <div class="skeleton"></div>
                 </div>
             </div>
         </div>
-    </header>
+    </div><!-- /view-download -->
 
-    <!-- Features Section -->
-    <section id="features" class="features">
-        <h2 class="section-title">Built for <span class="neon-text">Binge-Watching</span></h2>
-        <div class="feature-grid">
-            <div class="feature-card glass-card">
-                <i class="fas fa-mobile-alt neon-text"></i>
-                <h3>Custom UI Design</h3>
-                <p>A highly polished, intuitive interface designed specifically for mobile and desktop viewing comfort.</p>
-            </div>
-            <div class="feature-card glass-card">
-                <i class="fas fa-play-circle neon-text"></i>
-                <h3>Advanced Video Player</h3>
-                <p>Robust playback logic ensuring smooth, buffer-free streaming of high-quality cinematic content.</p>
-            </div>
-            <div class="feature-card glass-card">
-                <i class="fas fa-bolt neon-text"></i>
-                <h3>Auto-Updates</h3>
-                <p>Built-in update mechanics keep you on the latest version seamlessly.</p>
-            </div>
-        </div>
-    </section>
+    <footer>
+        <p>© 2026 <span>Lumino</span> · Free streaming, zero compromise.</p>
+    </footer>
 
-    <!-- Release Notes / Changelog Section -->
-    <section id="changelog-section" class="changelog-section">
-        <div class="changelog-container glass-card">
-            <h2>Release Notes <span id="changelog-version" class="neon-text"></span></h2>
-            <div id="changelog-content" class="markdown-body">
-                <!-- Markdown will be injected here -->
-                <div class="skeleton-loader"></div>
-                <div class="skeleton-loader short"></div>
-                <div class="skeleton-loader"></div>
-            </div>
-        </div>
-    </section>
-
-    <!-- External Libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/particles.js/2.0.0/particles.min.js"></script>
-    
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
+        // ── SPA ──
+        function show(v) {
+            ['home', 'download'].forEach(x => document.getElementById('view-' + x).classList.add('hidden'));
+            document.getElementById('view-' + v).classList.remove('hidden');
+            ['n-home', 'n-download'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove('active'); });
+            const a = document.getElementById('n-' + v); if (a) a.classList.add('active');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // ── PARTICLES ──
         document.addEventListener('DOMContentLoaded', () => {
-            // 1. Initialize Particle Background
-            particlesJS("particles-js", {
-                particles: {
-                    number: { value: 80, density: { enable: true, value_area: 800 } },
-                    color: { value: "#ffffff" },
-                    shape: { type: "circle" },
-                    opacity: { value: 0.2, random: true },
-                    size: { value: 3, random: true },
-                    line_linked: { enable: true, distance: 150, color: "#00f0ff", opacity: 0.1, width: 1 },
-                    move: { enable: true, speed: 1, direction: "none", random: false, straight: false, out_mode: "out", bounce: false }
-                },
-                interactivity: {
-                    detect_on: "canvas",
-                    events: { onhover: { enable: true, mode: "grab" }, resize: true },
-                    modes: { grab: { distance: 140, line_linked: { opacity: 0.5 } } }
-                },
-                retina_detect: true
+            if (typeof particlesJS !== 'undefined') {
+                particlesJS('particles-js', {
+                    particles: {
+                        number: { value: 70, density: { enable: true, value_area: 900 } },
+                        color: { value: '#ffffff' },
+                        shape: { type: 'circle' },
+                        opacity: { value: 0.18, random: true },
+                        size: { value: 2.5, random: true },
+                        line_linked: { enable: true, distance: 140, color: '#f2a93b', opacity: 0.12, width: 1 },
+                        move: { enable: true, speed: .8, direction: 'none', out_mode: 'out' }
+                    },
+                    interactivity: {
+                        detect_on: 'canvas',
+                        events: { onhover: { enable: true, mode: 'grab' }, resize: true },
+                        modes: { grab: { distance: 130, line_linked: { opacity: .35 } } }
+                    },
+                    retina_detect: true
+                });
+            }
+            fetchRelease();
+        });
+
+        // ── GITHUB RELEASE ──
+        const GH_API = 'https://api.github.com/repos/Sanjeevsnair/Lumino_window_Autoupdater/releases/latest';
+
+        async function fetchRelease() {
+            try {
+                const r = await fetch(GH_API);
+                if (!r.ok) throw new Error();
+                const d = await r.json();
+                applyRelease(d);
+            } catch (e) {
+                document.getElementById('loading-txt').innerHTML = '<i class="fas fa-exclamation-triangle"></i> Could not fetch release. Check connection.';
+                document.getElementById('changelog-content').innerHTML = '<p>Unable to load release notes. Visit GitHub directly.</p>';
+            }
+        }
+
+        function applyRelease(d) {
+            document.getElementById('loading-txt').style.display = 'none';
+            document.getElementById('btn-container').style.display = 'flex';
+
+            document.getElementById('ver-badge').textContent = 'v' + d.tag_name;
+            document.getElementById('cl-ver').textContent = '(v' + d.tag_name + ')';
+
+            // update hero chip safely
+            const eyebrow = document.querySelector('.hero-eyebrow');
+            if (eyebrow) {
+                eyebrow.innerHTML = `<span class="dot"></span>v${d.tag_name} · Now Available · Free Forever`;
+            }
+
+            const dt = new Date(d.published_at);
+            const dateStr = dt.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+            document.getElementById('date-badge').textContent = dateStr;
+
+            // Populate spec table
+            const specVer = document.getElementById('spec-ver');
+            const specDate = document.getElementById('spec-date');
+            const specSize = document.getElementById('spec-size');
+            if (specVer) specVer.textContent = 'v' + d.tag_name;
+            if (specDate) specDate.textContent = dateStr;
+
+            const cl = document.getElementById('changelog-content');
+            cl.innerHTML = d.body && typeof marked !== 'undefined' ? marked.parse(d.body) : '<p>No release notes provided.</p>';
+
+            let apk = null, win = null, apkSize = 0;
+            d.assets.forEach(a => {
+                const n = a.name.toLowerCase();
+                if (n.endsWith('.apk')) {
+                    apk = a.browser_download_url;
+                    apkSize = a.size;
+                }
+                else if (n.endsWith('.exe') || n.endsWith('.msix')) win = a.browser_download_url;
             });
 
-            // 2. GitHub API Integration
-            const GITHUB_REPO_URL = 'https://api.github.com/repos/Sanjeevsnair/Lumino_window_Autoupdater/releases/latest';
-
-            async function fetchLatestRelease() {
-                try {
-                    const response = await fetch(GITHUB_REPO_URL);
-                    if (!response.ok) throw new Error('GitHub API Error');
-                    const data = await response.json();
-
-                    updateUI(data);
-                } catch (error) {
-                    console.error("Failed to fetch release:", error);
-                    handleErrorState();
-                }
+            if (specSize && apkSize > 0) {
+                specSize.textContent = (apkSize / (1024 * 1024)).toFixed(2) + ' MB';
             }
 
-            function updateUI(releaseData) {
-                // Hide loader, show buttons
-                document.getElementById('loading-text').style.display = 'none';
-                document.getElementById('btn-container').style.display = 'flex';
+            setBtn('btn-android', apk);
+            setBtn('btn-windows', win);
 
-                // Update Text Elements
-                document.getElementById('version-badge').textContent = `v${releaseData.tag_name}`;
-                document.getElementById('changelog-version').textContent = `(v${releaseData.tag_name})`;
-                
-                const date = new Date(releaseData.published_at);
-                document.getElementById('date-badge').textContent = date.toLocaleDateString(undefined, {
-                    year: 'numeric', month: 'long', day: 'numeric'
+            const ua = navigator.userAgent.toLowerCase();
+            if (/android/.test(ua)) document.getElementById('btn-android').classList.add('primary');
+            else if (/windows/.test(ua)) document.getElementById('btn-windows').classList.add('primary');
+        }
+
+        function setBtn(id, url) {
+            const b = document.getElementById(id);
+            if (url) {
+                b.href = url;
+                b.target = '_blank';
+                b.rel = 'noopener noreferrer';
+            } else {
+                b.classList.add('disabled');
+                b.title = 'Not available for this release';
+            }
+        }
+
+        // ── MODERN ANIMATIONS ──
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('active');
+                }
+            });
+        }, { threshold: 0.1 });
+
+        function initReveal() {
+            document.querySelectorAll('section, .feat-card, .card, .ott-card, .pill-grid span, .pc-card, details').forEach(el => {
+                el.classList.add('reveal');
+                observer.observe(el);
+            });
+        }
+
+        function initTilt() {
+            const phone = document.querySelector('.phone-wrap');
+            if (phone) {
+                phone.parentElement.addEventListener('mousemove', (e) => {
+                    const rect = phone.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    const xc = rect.width / 2;
+                    const yc = rect.height / 2;
+                    const dx = (x - xc) / 10;
+                    const dy = (y - yc) / 10;
+
+                    phone.style.transform = `rotateY(${dx}deg) rotateX(${-dy}deg)`;
+                    phone.style.animation = 'none';
                 });
 
-                // Parse Markdown Changelog
-                const changelogElement = document.getElementById('changelog-content');
-                if (releaseData.body) {
-                    changelogElement.innerHTML = marked.parse(releaseData.body);
-                } else {
-                    changelogElement.innerHTML = "<p>No release notes provided for this version.</p>";
-                }
-
-                // Map Assets
-                let apkUrl = null;
-                let windowsUrl = null;
-
-                releaseData.assets.forEach(asset => {
-                    const name = asset.name.toLowerCase();
-                    if (name.endsWith('.apk')) {
-                        apkUrl = asset.browser_download_url;
-                    } else if (name.endsWith('.exe') || name.endsWith('.msix')) {
-                        windowsUrl = asset.browser_download_url;
-                    }
+                phone.parentElement.addEventListener('mouseleave', () => {
+                    phone.style.transform = 'rotateY(0deg) rotateX(0deg)';
+                    phone.style.animation = 'float 6s ease-in-out infinite';
                 });
-
-                // Setup Buttons
-                setupDownloadButton('btn-android', apkUrl);
-                setupDownloadButton('btn-windows', windowsUrl);
-
-                // Highlight recommended download based on OS
-                highlightRecommendedOS();
             }
 
-            function setupDownloadButton(btnId, url) {
-                const btn = document.getElementById(btnId);
-                if (url) {
-                    btn.href = url;
-                    btn.classList.remove('disabled');
-                } else {
-                    btn.href = "#";
-                    btn.classList.add('disabled');
-                    btn.title = "Not available for this release";
-                }
-            }
+            // Spotlight effect for cards
+            document.querySelectorAll('.card, .feat-card, .ott-card').forEach(card => {
+                card.addEventListener('mousemove', (e) => {
+                    const rect = card.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
 
-            function highlightRecommendedOS() {
-                const userAgent = navigator.userAgent || navigator.vendor || window.opera;
-                const androidBtn = document.getElementById('btn-android');
-                const windowsBtn = document.getElementById('btn-windows');
+                    card.style.setProperty('--mouse-x', `${x}px`);
+                    card.style.setProperty('--mouse-y', `${y}px`);
+                });
+            });
+        }
 
-                if (/android/i.test(userAgent)) {
-                    androidBtn.classList.add('highlighted');
-                } else if (/windows/i.test(userAgent)) {
-                    windowsBtn.classList.add('highlighted');
-                }
-            }
-
-            function handleErrorState() {
-                document.getElementById('loading-text').innerHTML = '<i class="fas fa-exclamation-triangle text-danger"></i> Failed to connect to update server.';
-                document.getElementById('changelog-content').innerHTML = '<p>Unable to load release notes. Please check your internet connection or visit our GitHub directly.</p>';
-            }
-
-            // Initialize API Call
-            fetchLatestRelease();
+        document.addEventListener('DOMContentLoaded', () => {
+            initReveal();
+            initTilt();
         });
     </script>
 </body>
+
 </html>
