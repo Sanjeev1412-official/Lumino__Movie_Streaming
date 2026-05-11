@@ -1991,39 +1991,61 @@
             <div class="section-header">
                 <h2>App <span class="amber">Specifications</span></h2>
             </div>
-            <div class="card" style="max-width:720px;margin:0 auto">
-                <table class="info-table">
-                    <tbody>
-                        <tr>
-                            <td>App Name</td>
-                            <td>Lumino</td>
-                        </tr>
-                        <tr>
-                            <td>Latest Version</td>
-                            <td id="spec-ver">Loading…</td>
-                        </tr>
-                        <tr>
-                            <td>Last Updated</td>
-                            <td id="spec-date">Loading…</td>
-                        </tr>
-                        <tr>
-                            <td>File Size</td>
-                            <td id="spec-size">~62 MB</td>
-                        </tr>
-                        <tr>
-                            <td>Category</td>
-                            <td>Entertainment</td>
-                        </tr>
-                        <tr>
-                            <td>License</td>
-                            <td>Free · No Ads · Premium Unlocked</td>
-                        </tr>
-                        <tr>
-                            <td>Compatibility</td>
-                            <td>Android 5.0+ / Windows 10+</td>
-                        </tr>
-                    </tbody>
-                </table>
+            <div class="pc-grid" style="max-width:1000px;margin:0 auto">
+                <div class="card" style="padding: 1.5rem">
+                    <h3 style="margin-bottom: 1.2rem; font-size: 1.1rem; text-align: center;"><i class="fab fa-android amber" style="margin-right: 8px;"></i> Android Specifications</h3>
+                    <table class="info-table">
+                        <tbody>
+                            <tr>
+                                <td>Format</td>
+                                <td>.APK</td>
+                            </tr>
+                            <tr>
+                                <td>Version</td>
+                                <td id="spec-ver-apk">Loading…</td>
+                            </tr>
+                            <tr>
+                                <td>Updated</td>
+                                <td id="spec-date-apk">Loading…</td>
+                            </tr>
+                            <tr>
+                                <td>File Size</td>
+                                <td id="spec-size-apk">Loading…</td>
+                            </tr>
+                            <tr>
+                                <td>Requires</td>
+                                <td>Android 5.0 or later</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card" style="padding: 1.5rem">
+                    <h3 style="margin-bottom: 1.2rem; font-size: 1.1rem; text-align: center;"><i class="fab fa-windows amber" style="margin-right: 8px;"></i> Windows Specifications</h3>
+                    <table class="info-table">
+                        <tbody>
+                            <tr>
+                                <td>Format</td>
+                                <td>.EXE / .MSIX</td>
+                            </tr>
+                            <tr>
+                                <td>Version</td>
+                                <td id="spec-ver-win">Loading…</td>
+                            </tr>
+                            <tr>
+                                <td>Updated</td>
+                                <td id="spec-date-win">Loading…</td>
+                            </tr>
+                            <tr>
+                                <td>File Size</td>
+                                <td id="spec-size-win">Loading…</td>
+                            </tr>
+                            <tr>
+                                <td>Requires</td>
+                                <td>Windows 10/11 (64-bit)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </section>
 
@@ -2111,28 +2133,42 @@
             const dateStr = dt.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
             document.getElementById('date-badge').textContent = dateStr;
 
-            // Populate spec table
-            const specVer = document.getElementById('spec-ver');
-            const specDate = document.getElementById('spec-date');
-            const specSize = document.getElementById('spec-size');
-            if (specVer) specVer.textContent = 'v' + d.tag_name;
-            if (specDate) specDate.textContent = dateStr;
+            // Populate split spec tables
+            const specVerApk = document.getElementById('spec-ver-apk');
+            const specDateApk = document.getElementById('spec-date-apk');
+            const specSizeApk = document.getElementById('spec-size-apk');
+            
+            const specVerWin = document.getElementById('spec-ver-win');
+            const specDateWin = document.getElementById('spec-date-win');
+            const specSizeWin = document.getElementById('spec-size-win');
+
+            if (specVerApk) specVerApk.textContent = 'v' + d.tag_name;
+            if (specDateApk) specDateApk.textContent = dateStr;
+            
+            if (specVerWin) specVerWin.textContent = 'v' + d.tag_name;
+            if (specDateWin) specDateWin.textContent = dateStr;
 
             const cl = document.getElementById('changelog-content');
             cl.innerHTML = d.body && typeof marked !== 'undefined' ? marked.parse(d.body) : '<p>No release notes provided.</p>';
 
-            let apk = null, win = null, apkSize = 0;
+            let apk = null, win = null, apkSize = 0, winSize = 0;
             d.assets.forEach(a => {
                 const n = a.name.toLowerCase();
                 if (n.endsWith('.apk')) {
                     apk = a.browser_download_url;
                     apkSize = a.size;
                 }
-                else if (n.endsWith('.exe') || n.endsWith('.msix')) win = a.browser_download_url;
+                else if (n.endsWith('.exe') || n.endsWith('.msix')) {
+                    win = a.browser_download_url;
+                    winSize = a.size;
+                }
             });
 
-            if (specSize && apkSize > 0) {
-                specSize.textContent = (apkSize / (1024 * 1024)).toFixed(2) + ' MB';
+            if (specSizeApk) {
+                specSizeApk.textContent = apkSize > 0 ? (apkSize / (1024 * 1024)).toFixed(2) + ' MB' : 'N/A';
+            }
+            if (specSizeWin) {
+                specSizeWin.textContent = winSize > 0 ? (winSize / (1024 * 1024)).toFixed(2) + ' MB' : 'N/A';
             }
 
             setBtn('btn-android', apk);
