@@ -1,0 +1,86 @@
+name: lumino_app_moviestreaming
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.3.3
+
+environment:
+  sdk: ^3.10.1
+
+dependencies:
+  cached_network_image: ^3.4.1
+  connectivity_plus: ^7.0.0
+  flutter:
+    sdk: flutter
+  flutter_launcher_icons: ^0.14.4
+  http: ^1.6.0
+  internet_connection_checker: ^1.0.0+1
+  lottie: ^3.3.2
+  media_kit: ^1.2.2
+  media_kit_libs_android_video: ^1.3.8
+  media_kit_libs_ios_video: ^1.1.4
+  media_kit_libs_video: ^1.0.7
+  media_kit_video: ^2.0.0
+  wakelock_plus: ^1.4.0
+  media_kit_libs_windows_video: ^1.0.11
+  path_provider: ^2.1.5
+  path: ^1.9.1
+  background_downloader: ^9.4.0
+  permission_handler: ^12.0.1
+  youtube_explode_dart: ^3.0.5
+  shared_preferences: ^2.5.3
+  app_updater: ^2.1.0
+  android_intent_plus: ^6.0.0
+  auto_updater: ^1.0.0
+  cryptography: ^2.9.0
+  window_manager: ^0.5.1
+  package_info_plus: ^9.0.0
+  crypto: ^3.0.7
+  intl: ^0.20.2
+  html: ^0.15.6
+  dio: ^5.9.0
+  supabase_flutter: ^2.12.4
+  google_sign_in: ^7.2.0
+  protocol_handler: ^0.2.0
+  windows_single_instance: ^1.1.0
+  file_picker: ^8.1.7
+  iconsax: ^0.0.8
+  hugeicons: ^1.1.6
+  google_fonts: ^8.1.0
+  url_launcher: ^6.3.2
+  flutter_svg: ^2.3.0
+  local_notifier: ^0.1.6
+  flutter_local_notifications: ^21.0.0
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^7.2.0
+  firebase_core: ^2.15.0
+  firebase_messaging: ^14.6.5
+  device_info_plus: ^11.3.0
+  flutter_secure_storage: ^10.3.1
+  screen_brightness: ^2.1.11
+  flutter_volume_controller: ^2.0.2
+  
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/animations/splash.json
+    - assets/animations/loader.json
+    - assets/certs/cacert.pem
+    - assets/icon/app_icon.png
+
+# ---- FIXED ICON CONFIG ----
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  windows:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    icon_size: 256 

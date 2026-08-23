@@ -1,0 +1,502 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:lottie/lottie.dart';
+import 'details.dart';
+import 'toast.dart';
+
+/* ---------------- networking ---------------- */
+
+Future<http.Response?> safeGetRetry(
+  Uri uri, {
+  int retries = 3,
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  int attempt = 0;
+  while (attempt < retries) {
+    try {
+      final res = await http.get(uri).timeout(timeout);
+      if (res.statusCode == 200) return res;
+      if (res.statusCode == 429 || res.statusCode >= 500) {
+        attempt++;
+        await Future.delayed(Duration(milliseconds: 300 * attempt * attempt));
+        continue;
+      }
+      return null;
+    } catch (e) {
+      if (e is SocketException || e is TimeoutException) {
+        attempt++;
+        await Future.delayed(Duration(milliseconds: 300 * attempt * attempt));
+        continue;
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
+/* ---------------- page ---------------- */
+
+class SearchPage extends StatefulWidget {
+  final String apiKey;
+  final String base;
+  final String imgW185;
+  final String imgW500;
+  final String imgW780;
+
+  const SearchPage({
+    super.key,
+    required this.apiKey,
+    required this.base,
+    required this.imgW185,
+    required this.imgW500,
+    required this.imgW780,
+  });
+
+  @override
+  State<SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<SearchPage> {
+  final _controller = TextEditingController();
+  final FocusNode _keyboardFocusNode = FocusNode();
+
+  Timer? _debounce;
+
+  bool _loading = false;
+  String _query = '';
+
+  List<_Person> _people = [];
+  List<_TmdbItem> _media = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _keyboardFocusNode.requestFocus();
+    });
+  }
+
+  void _onChanged() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+
+      final q = _controller.text.trim();
+      if (q.isEmpty) {
+        setState(() {
+          _query = '';
+          _people.clear();
+          _media.clear();
+        });
+        return;
+      }
+
+      _query = q;
+      _search(q);
+    });
+  }
+
+  Future<void> _search(String q) async {
+    if (!mounted) return;
+    setState(() => _loading = true);
+
+    final uri = Uri.parse(
+      '${widget.base}/search/multi'
+      '?api_key=${widget.apiKey}'
+      '&include_adult=false'
+      '&query=${Uri.encodeQueryComponent(q)}',
+    );
+
+    final res = await safeGetRetry(uri);
+    if (!mounted) return;
+
+    if (res == null) {
+      AppToast.show(context, 'network error');
+      setState(() => _loading = false);
+      return;
+    }
+
+    final map = json.decode(res.body);
+    final raw = (map['results'] as List?) ?? [];
+
+    _people.clear();
+    _media.clear();
+
+    for (final m in raw.cast<Map<String, dynamic>>()) {
+      final type = m['media_type'];
+      if (type == 'person') {
+        _people.add(_Person.fromJson(m));
+      } else if (type == 'movie' || type == 'tv') {
+        _media.add(_TmdbItem.fromJson(m));
+      }
+    }
+
+    if (!mounted) return;
+    setState(() => _loading = false);
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    _keyboardFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0E1117),
+      body: RawKeyboardListener(
+        focusNode: _keyboardFocusNode,
+        onKey: (event) {
+          if (event is RawKeyDownEvent &&
+              event.logicalKey == LogicalKeyboardKey.escape) {
+            _debounce?.cancel();
+            Navigator.of(context).maybePop();
+          }
+        },
+        child: SafeArea(
+          child: Column(
+            children: [
+              _SearchBar(
+                controller: _controller,
+                onCancel: () {
+                  _debounce?.cancel();
+                  FocusScope.of(context).unfocus();
+                  Navigator.of(context).maybePop();
+                },
+              ),
+              Expanded(
+                child: _query.isEmpty
+                    ? const _Hint()
+                    : _loading
+                        ? const _Loading()
+                        : _Results(
+                            media: _media,
+                            imgW500: widget.imgW500,
+                            apiKey: widget.apiKey,
+                            base: widget.base,
+                            imgW185: widget.imgW185,
+                            imgW780: widget.imgW780,
+                          ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/* ---------------- search bar ---------------- */
+
+class _SearchBar extends StatelessWidget {
+  final TextEditingController controller;
+  final VoidCallback onCancel;
+
+  const _SearchBar({
+    required this.controller,
+    required this.onCancel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              autofocus: true,
+              cursorColor: const Color(0xFFFF8C1A),
+              decoration: InputDecoration(
+                hintText: 'search movies, series',
+                filled: true,
+                fillColor: const Color(0xFF1A1F2B),
+                prefixIcon: const Icon(Icons.search),
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 14),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          TextButton(
+            onPressed: onCancel,
+            child: const Text(
+              'cancel',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFFFF8C1A),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/* ---------------- responsive grid helper ---------------- */
+
+int responsiveGridCount(double width) {
+  if (width < 480) return 4;
+  if (width < 720) return 5;
+  if (width < 1024) return 6;
+  if (width < 1440) return 7;
+  return 6;
+}
+
+/* ---------------- results ---------------- */
+
+class _Results extends StatelessWidget {
+  final List<_TmdbItem> media;
+  final String imgW500;
+  final String apiKey;
+  final String base;
+  final String imgW185;
+  final String imgW780;
+
+  const _Results({
+    required this.media,
+    required this.imgW500,
+    required this.apiKey,
+    required this.base,
+    required this.imgW185,
+    required this.imgW780,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      slivers: [
+        if (media.isNotEmpty) ...[
+          const _SliverTitle('results'),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            sliver: SliverLayoutBuilder(
+              builder: (context, constraints) {
+                final cols =
+                    responsiveGridCount(constraints.crossAxisExtent);
+                final aspect = cols >= 5 ? 0.66 : 0.62;
+
+                return SliverGrid(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, i) {
+                      final m = media[i];
+                      return _MediaGridCard(
+                        item: m,
+                        imgW500: imgW500,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => DetailsPage(
+                                apiKey: apiKey,
+                                base: base,
+                                imgW185: imgW185,
+                                imgW500: imgW500,
+                                imgW780: imgW780,
+                                id: m.id,
+                                mediaType: m.mediaType,
+                                linkApiBase:
+                                    'https://lumino-backend-cnmu.onrender.com',
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                    childCount: media.length,
+                  ),
+                  gridDelegate:
+                      SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: cols,
+                    mainAxisSpacing: 18,
+                    crossAxisSpacing: 14,
+                    childAspectRatio: aspect,
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/* ---------------- grid card ---------------- */
+
+class _MediaGridCard extends StatelessWidget {
+  final _TmdbItem item;
+  final String imgW500;
+  final VoidCallback onTap;
+
+  const _MediaGridCard({
+    required this.item,
+    required this.imgW500,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final img = item.posterPath;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.5),
+              blurRadius: 28,
+              offset: const Offset(0, 18),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (img != null)
+                Image.network('$imgW500$img', fit: BoxFit.cover)
+              else
+                Container(color: const Color(0xFF1A1F2B)),
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.92),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: 12,
+                child: Text(
+                  item.displayTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/* ---------------- misc ---------------- */
+
+class _SliverTitle extends StatelessWidget {
+  final String text;
+  const _SliverTitle(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 22, 16, 12),
+      sliver: SliverToBoxAdapter(
+        child: Text(
+          text,
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.6,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Loading extends StatelessWidget {
+  const _Loading();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Lottie.asset('assets/animations/loader.json', width: 180),
+    );
+  }
+}
+
+class _Hint extends StatelessWidget {
+  const _Hint();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Text(
+        'start typing to discover movies',
+        style: TextStyle(color: Colors.white70),
+      ),
+    );
+  }
+}
+
+/* ---------------- models ---------------- */
+
+class _Person {
+  final int id;
+  final String name;
+  final String? profilePath;
+
+  _Person({required this.id, required this.name, this.profilePath});
+
+  factory _Person.fromJson(Map<String, dynamic> j) => _Person(
+        id: j['id'],
+        name: j['name'] ?? '',
+        profilePath: j['profile_path'],
+      );
+}
+
+class _TmdbItem {
+  final int id;
+  final String mediaType;
+  final String? title;
+  final String? name;
+  final String? posterPath;
+
+  _TmdbItem({
+    required this.id,
+    required this.mediaType,
+    this.title,
+    this.name,
+    this.posterPath,
+  });
+
+  String get displayTitle => title ?? name ?? 'untitled';
+
+  factory _TmdbItem.fromJson(Map<String, dynamic> j) => _TmdbItem(
+        id: j['id'],
+        mediaType: j['media_type'],
+        title: j['title'],
+        name: j['name'],
+        posterPath: j['poster_path'],
+      );
+}

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "306276290002",
+    "project_id": "lumino-8c15b",
+    "storage_bucket": "lumino-8c15b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:306276290002:android:428b77bb758a651a168c0b",
+        "android_client_info": {
+          "package_name": "com.example.lumino_app_moviestreaming"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCc62iATBQpXWKUeW8dGo73lPoHTRzbc3Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

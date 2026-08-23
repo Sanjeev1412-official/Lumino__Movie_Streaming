@@ -1,0 +1,108 @@
+# ==========================================
+# Lumino Flutter App .gitignore
+# ==========================================
+
+# ─── Secrets & Private Keys (CRITICAL) ────
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+dsa_priv.pem
+appcast_priv.pem
+/google-services.json
+*private_key*
+*secret*
+
+# ─── Large Build Artifacts & Binaries ─────
+/build/
+/dist/
+/installers/
+/Output/
+/Lumino/
+*.apk
+*.aab
+*.exe
+*.dll
+*.so
+*.dylib
+*.msix
+*.zip
+*.tar.gz
+*.mp4
+*.mkv
+*.avi
+
+# ─── Flutter & Dart Generated Caches ──────
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/coverage/
+**/doc/api/
+app.*.symbols
+app.*.map.json
+
+# ─── Logs & Scratch / Temp Files ──────────
+*.log
+*.swp
+*.tmp
+*.temp
+*~
+hs_err_pid*
+analyze_output*.txt
+build_log*.txt
+events*.json
+home_events*.json
+test_*.py
+fix_*.py
+
+# ─── IDE & Tooling ────────────────────────
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+.atom/
+.history
+.svn/
+.swiftpm/
+devtools_options.yaml
+
+# ─── Android ──────────────────────────────
+/android/.gradle/
+/android/local.properties
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
+/android/app/build/
+/android/captures/
+/android/.cxx/
+/android/.externalNativeBuild/
+/android/key.properties
+
+# ─── Windows C++ & Ephemeral ──────────────
+windows/flutter/ephemeral/
+*.vcxproj.user
+*.vcxproj.idb
+*.pdb
+*.obj
+*.ilk
+*.lib
+*.exp
+*.WebView2/
+EBWebView/
+LuminoExternalPlayer.exe.WebView2/
+
+# ─── iOS & macOS ──────────────────────────
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Pods/
+**/ios/.symlinks/
+**/macos/Flutter/ephemeral/
+**/macos/Pods/
+**/macos/.symlinks/
