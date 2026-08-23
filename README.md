@@ -7,16 +7,39 @@
 
   [![Flutter Version](https://img.shields.io/badge/Flutter-%3E%3D3.10.1-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
   [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android-FFB561?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming)
-  [![Version](https://img.shields.io/badge/Version-v1.3.3-brightgreen?style=for-the-badge)](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases)
+  [![Version](https://img.shields.io/badge/Version-v1.3.3-brightgreen?style=for-the-badge)](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases/latest)
   [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
   <p align="center">
     A premium, high-performance streaming application engineered with Flutter and <code>libmpv</code>. Stream movies, TV series, and live television with ultra-fast multi-source providers, 4K auto-quality selection, multi-language audio tracks, and hardware-accelerated playback.
   </p>
 
-  [Download Release](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases) • [Features](#-key-features) • [Installation](#-installation) • [Tech Stack](#-tech-stack) • [Building From Source](#-building-from-source)
+  <p align="center">
+    <a href="https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases/latest">
+      <img src="https://img.shields.io/badge/Download%20for-Windows%20(.exe)-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows" />
+    </a>
+    &nbsp;&nbsp;
+    <a href="https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases/latest">
+      <img src="https://img.shields.io/badge/Download%20for-Android%20(.apk)-3DDC84?style=for-the-badge&logo=android&logoColor=black" alt="Download Android" />
+    </a>
+  </p>
+
+  [⬇️ Download Latest](#-download--installation) • [✨ Features](#-key-features) • [🛠️ Tech Stack](#-tech-stack--architecture) • [🔨 Building From Source](#-building-from-source)
 
 </div>
+
+---
+
+## 🚀 Download & Installation
+
+Get the latest stable release directly for your operating system:
+
+| Platform | Format | Direct Download Link |
+|---|---|---|
+| 💻 **Windows** (x64) | Setup Installer (`.exe`) | [**⬇️ Download Windows Installer (Latest)**](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases/latest) |
+| 📱 **Android** (Universal) | Standalone Package (`.apk`) | [**⬇️ Download Android APK (Latest)**](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases/latest) |
+
+> 💡 **Tip**: You can also browse all past versions, release notes, and assets on the [**GitHub Releases Page**](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases).
 
 ---
 
@@ -41,19 +64,6 @@
 | **UI & Icons** | `google_fonts`, `hugeicons`, `lottie` animations |
 | **Storage & Caching** | `shared_preferences`, `sqflite`, `cached_network_image` |
 | **Platform Integration** | `flutter_volume_controller`, `screen_brightness`, `wakelock_plus` |
-
----
-
-## 🚀 Installation
-
-### 💻 Windows
-1. Download the latest `Lumino_Setup_v1.3.3.exe` from [Releases](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases).
-2. Run the setup wizard to install Lumino.
-3. Launch Lumino from the Start Menu or Desktop shortcut.
-
-### 📱 Android
-1. Download the latest `Lumino_1.3.3.apk` from [Releases](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases).
-2. Open the APK on your Android device and confirm installation (*Allow unknown sources* if prompted).
 
 ---
 
