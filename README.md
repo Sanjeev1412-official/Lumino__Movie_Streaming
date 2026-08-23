@@ -22,24 +22,9 @@
 
 ## ✨ Key Features
 
-### 🎬 High-Performance Video Player
 * **Hardware-Accelerated Playback**: Powered by `media_kit` and `libmpv` for smooth decoding of 4K UHD, HDR, and high-bitrate media.
-* **4K Auto-Priority**: Intelligent quality prioritization (**4K / 2160p ➔ 1440p ➔ 1080p ➔ 720p ➔ 480p**) ensures the highest fidelity is always played first.
-* **200% Audio Gain & Dialog Boost**: Built-in 2.0x audio amplification with 350% headroom to bring dialogue to life on low-volume sources.
-* **Multi-Audio & Subtitles**: Full support for embedded container tracks and dynamic external subtitle providers with automated language translation/formatting.
-
-### 📱 Intuitive Gestures & Modern Micro-Interactions
-* **Rubber-Wave Seek**: Modern YouTube-style double-tap seeking with elastic rubber-band animated chevrons and multi-tap duration accumulation (`+10s`, `+20s`, `+30s`...).
-* **Native Swipe Controls**: Seamless vertical swipe gestures for system volume and screen brightness with built-in edge deadzones to prevent accidental touches.
-* **Smart Order Lists**: Active qualities, audio tracks, and subtitle options automatically rise to the top of selection drawers.
-
-### 🌐 Multi-Provider Engine
 * **High-Speed HTTP Streaming**: Integrated support for premium HTTP sources (MovieBox, Pixeldrain, FSL, 10Gbps).
-* **Torrent Backend Streaming**: Real-time streaming for magnet links and torrent files with on-the-fly buffering.
 * **Live TV Channels**: Browse live television categories and stream IPTV broadcasts directly inside the player.
-
-### 💾 Offline Downloads & Sync
-* **Download Manager**: Background downloading with progress HUDs and notification progress bars.
 * **Cross-Device Sync & History**: Automatically remembers playback timestamps, episode completions, and syncs watch progress seamlessly via Supabase backend.
 * **In-App Auto-Updates**: Native auto-updater integration for both Windows (WinSparkle) and Android (in-app APK installer).
 
