@@ -16,6 +16,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:lumino_app_moviestreaming/watch_history_service.dart';
 import 'package:lumino_app_moviestreaming/primebox_service.dart';
+import 'package:lumino_app_moviestreaming/config/env_config.dart';
 
 class NotificationService {
   static const String _appUserIdKey = 'app_user_id';
@@ -888,7 +889,7 @@ class NotificationService {
 
       // 1. Fetch Home API
       try {
-        final res = await http.get(Uri.parse('https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/home'), headers: {
+        final res = await http.get(Uri.parse('${EnvConfig.lambdaUrl}/home'), headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }).timeout(const Duration(seconds: 15));
         if (res.statusCode == 200) {
@@ -947,7 +948,7 @@ class NotificationService {
 
       // 2. Fetch Movies API (Uses operatingList just like Home API)
       try {
-        final res = await http.get(Uri.parse('https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/movie'), headers: {
+        final res = await http.get(Uri.parse('${EnvConfig.lambdaUrl}/movie'), headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }).timeout(const Duration(seconds: 15));
         if (res.statusCode == 200) {
@@ -996,7 +997,7 @@ class NotificationService {
 
       // 3. Fetch Animation API (Uses items list)
       try {
-        final res = await http.get(Uri.parse('https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/animation'), headers: {
+        final res = await http.get(Uri.parse('${EnvConfig.lambdaUrl}/animation'), headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }).timeout(const Duration(seconds: 15));
         if (res.statusCode == 200) {
@@ -1169,7 +1170,7 @@ class NotificationService {
           }
 
           // 2. Fetch the latest detail data from Primebox Detail API
-          final detailApi = 'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/detail?detailPath=$detailPath';
+          final detailApi = '${EnvConfig.lambdaUrl}/detail?detailPath=$detailPath';
           final res = await http.get(Uri.parse(detailApi), headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           }).timeout(const Duration(seconds: 15));
@@ -1328,7 +1329,7 @@ class NotificationService {
       }
 
       if (match != null && match.detailPath.isNotEmpty) {
-        final detailApi = 'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/detail?detailPath=${match.detailPath}';
+        final detailApi = '${EnvConfig.lambdaUrl}/detail?detailPath=${match.detailPath}';
         final res = await http.get(Uri.parse(detailApi), headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }).timeout(const Duration(seconds: 15));

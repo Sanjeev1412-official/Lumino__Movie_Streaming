@@ -2,9 +2,10 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
+import 'package:lumino_app_moviestreaming/config/env_config.dart';
 
-/// Base URL of the local MovieBox FastAPI server (from app.py)
-const String _movieboxBase = 'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws';
+/// Base URL of the MovieBox API server
+String get _movieboxBase => EnvConfig.lambdaUrl;
 
 /// A single search result from /search
 class MovieBoxItem {

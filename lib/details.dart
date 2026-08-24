@@ -22,6 +22,7 @@ import 'package:lumino_app_moviestreaming/sync_service.dart';
 import 'package:lumino_app_moviestreaming/toast.dart';
 import 'package:lumino_app_moviestreaming/trailers.dart';
 import 'package:lumino_app_moviestreaming/videoplayer.dart';
+import 'package:lumino_app_moviestreaming/config/env_config.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:lumino_app_moviestreaming/watch_history_service.dart';
 import 'package:lumino_app_moviestreaming/auth_service.dart';
@@ -613,7 +614,7 @@ class _DetailsPageState extends State<DetailsPage> {
       }
 
       final uri = Uri.parse(
-        'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/detail?detailPath=$path',
+        '${EnvConfig.lambdaUrl}/detail?detailPath=$path',
       );
       if (kDebugMode) debugPrint('Primebox Bundle GET: $uri');
 
@@ -922,7 +923,7 @@ class _DetailsPageState extends State<DetailsPage> {
           }
 
           final uri = Uri.parse(
-            'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/detail?detailPath=$path',
+            '${EnvConfig.lambdaUrl}/detail?detailPath=$path',
           );
           final res = await _safeGet(
             uri,
@@ -1886,7 +1887,7 @@ class _DetailsPageState extends State<DetailsPage> {
     if (title.isNotEmpty) params['title'] = title;
 
     // put your known hosts here (raw strings ok); function will sanitize
-    final hostsToTryRaw = <String>['https://lumino-backend-cnmu.onrender.com'];
+    final hostsToTryRaw = <String>[EnvConfig.luminoBackendUrl];
     final hosts = hostsToTryRaw
         .map(sanitizeHost)
         .where((h) => h.isNotEmpty)
@@ -2039,10 +2040,10 @@ class _DetailsPageState extends State<DetailsPage> {
   }) async {
     final uri = mediaType == 'movie'
         ? Uri.parse(
-            'https://lumino-backend-cnmu.onrender.com/magnet/movie/$imdbId',
+            '${EnvConfig.luminoBackendUrl}/magnet/movie/$imdbId',
           )
         : Uri.parse(
-            'https://lumino-backend-cnmu.onrender.com/magnet/series/$imdbId/${season ?? 0}/${episode ?? 0}',
+            '${EnvConfig.luminoBackendUrl}/magnet/series/$imdbId/${season ?? 0}/${episode ?? 0}',
           );
 
     if (kDebugMode) debugPrint('Magnet lookup GET: $uri');

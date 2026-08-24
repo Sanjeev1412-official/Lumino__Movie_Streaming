@@ -1,1 +1,6 @@
-curl -X POST   "https://jbaqgmbaodrxyqmpnlca.supabase.co/functions/v1/send-push?forceSeries=true"   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpiYXFnbWJhb2RyeHlxbXBubGNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyODk0NzIsImV4cCI6MjA5Mjg2NTQ3Mn0.JvQCR0L_J4WkcTCkD3O68Wc6s3926b8DsklVF3Rd2Xo"   -H "Content-Type: application/json"
+```bash
+curl -X POST \
+  "https://<YOUR_SUPABASE_PROJECT_ID>.supabase.co/functions/v1/send-push?forceSeries=true" \
+  -H "Authorization: Bearer <YOUR_SUPABASE_ANON_KEY>" \
+  -H "Content-Type: application/json"
+```

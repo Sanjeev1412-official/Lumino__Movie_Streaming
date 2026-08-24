@@ -1,6 +1,7 @@
 // ignore_for_file: avoid_print
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:lumino_app_moviestreaming/config/env_config.dart';
 
 class LiveTvChannel {
   final String? code;
@@ -194,10 +195,10 @@ class LiveStreamData {
 }
 
 class LiveTvService {
-  static const String _homeUrl = 'https://sanjeev1412-livetv-api.hf.space/home';
-  static const String _eventUrl = 'https://sanjeev1412-livetv-api.hf.space/event';
-  static const String _detailsUrl = 'https://sanjeev1412-livetv-api.hf.space/details';
-  static const String _streamUrl = 'https://sanjeev1412-livetv-api.hf.space/stream';
+  static String get _homeUrl => '${EnvConfig.liveTvApiUrl}/home';
+  static String get _eventUrl => '${EnvConfig.liveTvApiUrl}/event';
+  static String get _detailsUrl => '${EnvConfig.liveTvApiUrl}/details';
+  static String get _streamUrl => '${EnvConfig.liveTvApiUrl}/stream';
 
   Future<List<LiveTvChannel>> fetchChannels() async {
     try {

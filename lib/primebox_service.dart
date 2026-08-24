@@ -2,8 +2,9 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
+import 'package:lumino_app_moviestreaming/config/env_config.dart';
 
-const String _baseUrl = 'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws';
+String get _baseUrl => EnvConfig.lambdaUrl;
 
 class PrimeboxItem {
   final String type;
@@ -138,8 +139,8 @@ class PrimeboxService {
       detailPath = detailPath.split('&').first;
     }
 
-    const List<String> baseUrls = [
-      'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws',
+    final List<String> baseUrls = [
+      EnvConfig.lambdaUrl,
     ];
 
     String? currentSubjectId;

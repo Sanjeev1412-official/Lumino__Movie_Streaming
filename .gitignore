@@ -11,9 +11,15 @@
 *.jks
 dsa_priv.pem
 appcast_priv.pem
-/google-services.json
+google-services.json
+**/google-services.json
 *private_key*
 *secret*
+.env
+.env.*
+!.env.example
+*.bak
+test_*.dart
 
 # ─── Large Build Artifacts & Binaries ─────
 /build/

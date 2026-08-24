@@ -8,6 +8,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'details.dart';
 import 'toast.dart';
 import 'moviebox_service.dart';
+import 'package:lumino_app_moviestreaming/config/env_config.dart';
 
 class SearchPage extends StatefulWidget {
   final String apiKey;
@@ -348,7 +349,7 @@ class _ModernResults extends StatelessWidget {
               imgW780: w.imgW780,
               id: 0, // TMDB ID will be resolved inside DetailsPage via MovieBox /details
               mediaType: item.isMovie ? 'movie' : 'tv',
-              linkApiBase: 'https://lumino-backend-cnmu.onrender.com',
+              linkApiBase: EnvConfig.luminoBackendUrl,
               movieboxSubjectId: item.id,
               initialTitle: item.title,
               initialBackdrop: item.poster,

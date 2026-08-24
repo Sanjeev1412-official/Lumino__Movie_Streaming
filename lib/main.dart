@@ -9,6 +9,7 @@ import 'package:windows_single_instance/windows_single_instance.dart';
 
 import 'package:lumino_app_moviestreaming/splashscreen.dart';
 import 'package:lumino_app_moviestreaming/auth_service.dart';
+import 'package:lumino_app_moviestreaming/config/env_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_core/firebase_core.dart'; // <-- ADD THIS
 
@@ -17,6 +18,9 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 void main(List<String> args) async {
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
+
+    // Initialize environment variables from .env
+    await EnvConfig.init();
 
     // Log all errors
     FlutterError.onError = (details) {
@@ -27,8 +31,8 @@ void main(List<String> args) async {
   // Initialize Supabase with error handling and timeout
   try {
     await Supabase.initialize(
-      url: 'https://jbaqgmbaodrxyqmpnlca.supabase.co',
-      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpiYXFnbWJhb2RyeHlxbXBubGNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyODk0NzIsImV4cCI6MjA5Mjg2NTQ3Mn0.JvQCR0L_J4WkcTCkD3O68Wc6s3926b8DsklVF3Rd2Xo',
+      url: EnvConfig.supabaseUrl,
+      anonKey: EnvConfig.supabaseAnonKey,
     ).timeout(const Duration(seconds: 8), onTimeout: () {
       debugPrint('Supabase initialization timed out');
       return Supabase.instance; // Return instance to continue

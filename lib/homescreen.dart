@@ -34,6 +34,7 @@ import 'package:lumino_app_moviestreaming/watch_history_service.dart';
 import 'package:lumino_app_moviestreaming/profile_button.dart';
 import 'package:lumino_app_moviestreaming/livetv_page.dart';
 import 'package:lumino_app_moviestreaming/update_service.dart';
+import 'package:lumino_app_moviestreaming/config/env_config.dart';
 
 class _AppScrollBehavior extends ScrollBehavior {
   const _AppScrollBehavior();
@@ -71,8 +72,7 @@ class MovieHomePage extends StatefulWidget {
 
 class _MovieHomePageState extends State<MovieHomePage>
     with WidgetsBindingObserver {
-  // TODO: replace with your TMDB API key
-  final String apiKey = 'b63055cc5966bf5978a1105408de599c';
+  String get apiKey => EnvConfig.tmdbApiKey;
 
   final String base = 'https://api.tmdb.org/3';
   final String imgW500 = 'https://image.tmdb.org/t/p/w500';
@@ -342,17 +342,13 @@ class _MovieHomePageState extends State<MovieHomePage>
   Future<Map<String, List<TmdbItem>>> _fetchAllSections(String tab) async {
     final Map<String, List<TmdbItem>> result = {};
 
-    String url =
-        'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/home';
+    String url = '${EnvConfig.lambdaUrl}/home';
     if (tab == 'Movies') {
-      url =
-          'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/movie';
+      url = '${EnvConfig.lambdaUrl}/movie';
     } else if (tab == 'Anime') {
-      url =
-          'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/animation';
+      url = '${EnvConfig.lambdaUrl}/animation';
     } else if (tab == 'TV') {
-      url =
-          'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/tv';
+      url = '${EnvConfig.lambdaUrl}/tv';
     }
 
     try {
@@ -1250,8 +1246,7 @@ class _ModernHeroCarouselState extends State<_ModernHeroCarousel> {
                             imgW780: widget.imgW780,
                             id: item.id,
                             mediaType: item.mediaType,
-                            linkApiBase:
-                                'https://lumino-backend-cnmu.onrender.com',
+                            linkApiBase: EnvConfig.luminoBackendUrl,
                             primeboxUrl: item.primeboxUrl,
                             primeboxSubjectType: item.primeboxSubjectType,
                             primeboxType: item.primeboxType,
@@ -1915,7 +1910,7 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
             imgW780: widget.imgW780,
             id: widget.item.id,
             mediaType: widget.item.mediaType,
-            linkApiBase: 'https://lumino-backend-cnmu.onrender.com',
+            linkApiBase: EnvConfig.luminoBackendUrl,
             primeboxUrl: widget.item.primeboxUrl,
             primeboxSubjectType: widget.item.primeboxSubjectType,
             primeboxType: widget.item.primeboxType,
@@ -2114,7 +2109,7 @@ class _ModernMediaCard extends StatelessWidget {
               imgW780: imgW780,
               id: item.id,
               mediaType: item.mediaType,
-              linkApiBase: 'https://lumino-backend-cnmu.onrender.com',
+              linkApiBase: EnvConfig.luminoBackendUrl,
               primeboxUrl: item.primeboxUrl,
               primeboxSubjectType: item.primeboxSubjectType,
               primeboxType: item.primeboxType,
@@ -3179,7 +3174,7 @@ class _ModernContinueCard extends StatelessWidget {
               imgW780: imgW780,
               id: item.id ?? 0,
               mediaType: item.mediaType,
-              linkApiBase: 'https://lumino-backend-cnmu.onrender.com',
+              linkApiBase: EnvConfig.luminoBackendUrl,
               primeboxUrl: item.primeboxUrl,
               primeboxSubjectType: item.primeboxSubjectType,
               primeboxType: item.primeboxType,

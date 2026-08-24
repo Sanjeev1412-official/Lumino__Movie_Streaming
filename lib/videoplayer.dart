@@ -23,6 +23,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:lumino_app_moviestreaming/config/env_config.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:lumino_app_moviestreaming/watch_history_service.dart';
 import 'package:lumino_app_moviestreaming/notification_service.dart';
@@ -546,7 +547,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     try {
       final res = await http.get(
         Uri.parse(
-          'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws/details?id=$subjectId',
+          '${EnvConfig.lambdaUrl}/details?id=$subjectId',
         ),
       );
       if (res.statusCode == 200) {
@@ -1613,8 +1614,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   Future<String?> _fetchEpisodeTitleFromTMDB(int season, int episode) async {
     try {
+      final effectiveApiKey = widget.tmdbApiKey ?? EnvConfig.tmdbApiKey;
       final url = Uri.parse(
-        'https://api.themoviedb.org/3/tv/${widget.tmdbId}/season/$season/episode/$episode?api_key=b63055cc5966bf5978a1105408de599c',
+        'https://api.themoviedb.org/3/tv/${widget.tmdbId}/season/$season/episode/$episode?api_key=$effectiveApiKey',
       );
 
       final resp = await http.get(url);
@@ -1877,7 +1879,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (sid == null) return;
     try {
       final res = await http.post(
-        Uri.parse('https://lumino-backend-cnmu.onrender.com/stop/$sid'),
+        Uri.parse('${EnvConfig.luminoBackendUrl}/stop/$sid'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'erase': erase}),
       );
@@ -1927,7 +1929,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
     try {
       final startUri = Uri.parse(
-        'https://lumino-backend-cnmu.onrender.com/start',
+        '${EnvConfig.luminoBackendUrl}/start',
       );
       debugPrint('TORRENT /start → $startUri');
 
