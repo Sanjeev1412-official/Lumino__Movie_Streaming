@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 
 class SeekCircleButton extends StatefulWidget {
-  final bool isForward; // true = 10s forward, false = 10s back
+  final bool isForward; // true = forward, false = back
   final VoidCallback? onTap;
   final bool big;
+  final int seconds;
 
   const SeekCircleButton({
     super.key,
     required this.isForward,
     this.onTap,
     this.big = false,
+    this.seconds = 10,
   });
 
   @override
@@ -25,6 +27,53 @@ class _SeekCircleButtonState extends State<SeekCircleButton>
   late final Animation<double> _rotation;
   late final Animation<double> _pulseOpacity;
   late final Animation<double> _pulseScale;
+
+  Widget _buildSeekIcon(bool enabled) {
+    final color = enabled ? Colors.white : Colors.white24;
+    final size = widget.big ? 44.0 : 34.0;
+    if (widget.seconds == 5) {
+      return Icon(
+        widget.isForward ? Icons.forward_5_rounded : Icons.replay_5_rounded,
+        size: size,
+        color: color,
+      );
+    }
+    if (widget.seconds == 10) {
+      return Icon(
+        widget.isForward ? Icons.forward_10_rounded : Icons.replay_10_rounded,
+        size: size,
+        color: color,
+      );
+    }
+    if (widget.seconds == 30) {
+      return Icon(
+        widget.isForward ? Icons.forward_30_rounded : Icons.replay_30_rounded,
+        size: size,
+        color: color,
+      );
+    }
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Icon(
+          widget.isForward ? Icons.rotate_right_rounded : Icons.rotate_left_rounded,
+          size: size,
+          color: color,
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Text(
+            '${widget.seconds}',
+            style: TextStyle(
+              fontSize: widget.big ? 11 : 9.5,
+              fontWeight: FontWeight.w900,
+              color: color,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   @override
   void initState() {
@@ -145,13 +194,7 @@ class _SeekCircleButtonState extends State<SeekCircleButton>
                         child: Stack(
                           alignment: Alignment.center,
                           children: [
-                            Icon(
-                              widget.isForward
-                                  ? Icons.forward_10_rounded
-                                  : Icons.replay_10_rounded,
-                              size: widget.big ? 44 : 34,
-                              color: enabled ? Colors.white : Colors.white24,
-                            ),
+                            _buildSeekIcon(enabled),
                           ],
                         ),
                       ),

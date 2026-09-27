@@ -106,7 +106,10 @@ class WatchHistoryService {
     String? primeboxType,
     String? movieboxSubjectId,
     bool isOffline = false,
+    bool isTrailer = false,
   }) async {
+    // Never save progress for trailers
+    if (isTrailer) return;
     // Don't save if position is 0 or duration is 0
     if (duration <= 0) return;
 

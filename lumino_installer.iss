@@ -2,7 +2,7 @@
 ; See https://jrsoftware.org/ishelp/ for details on Inno Setup script parameters.
 
 #define MyAppName "Lumino"
-#define MyAppVersion "1.3.3"
+#define MyAppVersion "1.3.4"
 #define MyAppPublisher "Sanjeev S Nair"
 #define MyAppURL "https://sanjeevsnair.github.io/Lumino_window_Autoupdater/"
 #define MyAppExeName "Lumino.exe"
@@ -18,11 +18,11 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-OutputDir=e:\PROJECTS\Flutter Project\lumino_test\installers
-OutputBaseFilename=Lumino_Setup_v1.3.3
-SetupIconFile="e:\PROJECTS\Flutter Project\lumino_test\windows\runner\resources\app_icon.ico"
-WizardImageFile="e:\PROJECTS\Flutter Project\lumino_test\assets\icon\app_icon.png"
-WizardSmallImageFile="e:\PROJECTS\Flutter Project\lumino_test\assets\icon\app_icon.png"
+OutputDir=installers
+OutputBaseFilename=Lumino_Setup_v1.3.4
+SetupIconFile="windows\runner\resources\app_icon.ico"
+WizardImageFile="assets\icon\app_icon.png"
+WizardSmallImageFile="assets\icon\app_icon.png"
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -34,8 +34,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "e:\PROJECTS\Flutter Project\lumino_test\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Excludes: "*.pdb,*.lib,*.exp,*.ilk,*.obj,ExternalPlayer\*,*.WebView2\*,EBWebView\*"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "e:\PROJECTS\Flutter Project\LuminoExternalPlayer\bin\Release\net10.0-windows\*"; DestDir: "{app}\ExternalPlayer"; Excludes: "*.pdb,*.ilk,*.obj,*.WebView2\*,EBWebView\*,LuminoExternalPlayer.exe.WebView2\*"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "build\windows\x64\runner\Release\*"; DestDir: "{app}"; Excludes: "*.pdb,*.lib,*.exp,*.ilk,*.obj,ExternalPlayer\*,*.WebView2\*,EBWebView\*"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\LuminoExternalPlayer\bin\Release\net10.0-windows\*"; DestDir: "{app}\ExternalPlayer"; Excludes: "*.pdb,*.ilk,*.obj,*.WebView2\*,EBWebView\*,LuminoExternalPlayer.exe.WebView2\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

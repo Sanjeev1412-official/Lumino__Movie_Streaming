@@ -8,13 +8,11 @@ import 'dart:ui';
 
 import 'dart:io';
 
-import 'package:auto_updater/auto_updater.dart'; // <-- NEW
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart'
     show kIsWeb, defaultTargetPlatform, kDebugMode;
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:package_info_plus/package_info_plus.dart';
+import 'package:flutter/services.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_fonts/google_fonts.dart';
@@ -28,13 +26,16 @@ import 'package:lumino_app_moviestreaming/network_service.dart';
 import 'package:lumino_app_moviestreaming/search.dart';
 import 'package:flutter/gestures.dart';
 import 'package:lumino_app_moviestreaming/sync_service.dart';
-import 'package:lumino_app_moviestreaming/toast.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:lumino_app_moviestreaming/watch_history_service.dart';
 import 'package:lumino_app_moviestreaming/profile_button.dart';
-import 'package:lumino_app_moviestreaming/livetv_page.dart';
 import 'package:lumino_app_moviestreaming/update_service.dart';
 import 'package:lumino_app_moviestreaming/config/env_config.dart';
+import 'package:lumino_app_moviestreaming/layout_settings_service.dart';
+import 'package:lumino_app_moviestreaming/app_logo_widget.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+export 'package:lumino_app_moviestreaming/check_update_page.dart';
+import 'package:lumino_app_moviestreaming/check_update_page.dart';
 
 class _AppScrollBehavior extends ScrollBehavior {
   const _AppScrollBehavior();
@@ -80,6 +81,7 @@ class _MovieHomePageState extends State<MovieHomePage>
 
   late final Map<String, String> sections; // path -> label
   late Future<Map<String, List<TmdbItem>>> _sectionsFuture;
+  static final Map<String, Map<String, List<TmdbItem>>> _tabSectionsCache = {};
 
   final bool _errorToastShown = false;
   final bool _emptyToastShown = false;
@@ -114,7 +116,6 @@ class _MovieHomePageState extends State<MovieHomePage>
     _sectionsFuture = _fetchAllSections(_selectedTab);
     ensureNotificationPermission();
 
-    _initAutoUpdater(); // <-- NEW
     _loadHistory();
     WidgetsBinding.instance.addObserver(this);
     // Initial sync when home screen is first loaded
@@ -132,12 +133,15 @@ class _MovieHomePageState extends State<MovieHomePage>
   Future<void> _checkForUpdateSilently() async {
     if (!mounted) return;
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final autoCheck = prefs.getBool('lumino_auto_check_updates') ?? true;
+      if (!autoCheck) return;
+      if (!mounted) return;
       await UpdateService().checkForUpdates(context);
     } catch (e) {
-      debugPrint('[UpdateService] silent check failed: ');
+      debugPrint('[UpdateService] silent check failed: $e');
     }
   }
-
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -160,32 +164,7 @@ class _MovieHomePageState extends State<MovieHomePage>
     }
   }
 
-  // ---------- NEW: auto-updater init ----------
-  Future<void> _initAutoUpdater() async {
-    // --- IMPORTANT: prevent MissingPluginException on mobile/web ---
-    if (kIsWeb) return;
-
-    bool isDesktop = false;
-    try {
-      isDesktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
-    } catch (_) {
-      return; // Platform check failed â†’ do nothing
-    }
-
-    if (!isDesktop) return; // STOP if not desktop
-
-    // --- Desktop only code starts here ---
-    try {
-      const feedURL =
-          'https://sanjeevsnair.github.io/Lumino_window_Autoupdater/updates/appcast.xml';
-      await autoUpdater.setFeedURL(feedURL);
-      await autoUpdater.setScheduledCheckInterval(3600);
-    } catch (e) {
-      debugPrint('auto_updater init failed: $e');
-    }
-  }
-
-  // ---------- NEW: open check-update screen ----------
+  // ---------- Open check-update screen ----------
   void _openCheckUpdateScreen() {
     Navigator.of(
       context,
@@ -339,162 +318,279 @@ class _MovieHomePageState extends State<MovieHomePage>
     return const [];
   }
 
-  Future<Map<String, List<TmdbItem>>> _fetchAllSections(String tab) async {
-    final Map<String, List<TmdbItem>> result = {};
-
-    String url = '${EnvConfig.lambdaUrl}/home';
-    if (tab == 'Movies') {
-      url = '${EnvConfig.lambdaUrl}/movie';
-    } else if (tab == 'Anime') {
-      url = '${EnvConfig.lambdaUrl}/animation';
-    } else if (tab == 'TV') {
-      url = '${EnvConfig.lambdaUrl}/tv';
+  Future<Map<String, List<TmdbItem>>> _fetchAllSections(
+    String tab, {
+    bool forceRefresh = false,
+  }) async {
+    // Fast path: Return cached sections if available
+    if (!forceRefresh &&
+        _tabSectionsCache[tab] != null &&
+        _tabSectionsCache[tab]!.isNotEmpty) {
+      return _tabSectionsCache[tab]!;
     }
 
-    try {
-      final res = await http
-          .get(
-            Uri.parse(url),
-            headers: {
-              'User-Agent':
-                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
+    final lambdaBase = EnvConfig.lambdaUrl.isNotEmpty
+        ? EnvConfig.lambdaUrl
+        : 'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws';
 
-      if (res.statusCode == 200) {
-        final body = json.decode(res.body);
+    String url = '$lambdaBase/home';
+    if (tab == 'Movies') {
+      url = '$lambdaBase/movie';
+    } else if (tab == 'Anime') {
+      url = '$lambdaBase/animation';
+    } else if (tab == 'TV') {
+      url = '$lambdaBase/tv';
+    }
 
-        // New /home endpoint format
-        if (body['categories'] != null) {
-          final categories = body['categories'] as List;
-          final seenSignatures = <String>{};
+    int attempt = 0;
+    const maxAttempts = 2;
 
-          for (final cat in categories) {
-            final rawCatName = cat['name']?.toString() ?? 'Unknown';
-            final results = cat['results'] as List?;
-            if (results == null || results.isEmpty) continue;
+    while (attempt < maxAttempts) {
+      attempt++;
+      try {
+        final res = await http
+            .get(
+              Uri.parse(url),
+              headers: {
+                'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              },
+            )
+            .timeout(const Duration(seconds: 30));
 
-            final list = <TmdbItem>[];
-            for (final item in results) {
-              final sid = item['subjectId']?.toString();
-              if (sid == null) continue;
-              final subjectType = item['subjectType'] ?? (item['type'] == 'TvSeries' ? 2 : 1);
-              final isTv = subjectType == 2 || subjectType == 7 || item['type'] == 'TvSeries';
-              final mediaType = isTv ? 'tv' : 'movie';
+        if (res.statusCode == 200) {
+          final body = json.decode(res.body);
+          final Map<String, List<TmdbItem>> result = {};
 
-              list.add(
-                TmdbItem(
-                  id: item['tmdb_id'] ?? 0,
-                  mediaType: mediaType,
-                  title: item['title']?.toString() ?? '',
-                  posterPath: item['poster'] ?? item['posterUrl'],
-                  backdropPath: item['background'] ?? item['posterUrl'],
-                  logoPath: item['logo'],
-                  overview: item['plot'],
-                  releaseDate: item['year']?.toString(),
-                  voteAverage: double.tryParse(item['score']?.toString() ?? item['rating']?.toString() ?? '0'),
-                  movieboxSubjectId: sid,
-                ),
-              );
-            }
+          // New /home endpoint format
+          if (body['categories'] != null) {
+            final categories = body['categories'] as List;
+            final seenSignatures = <String>{};
 
-            if (list.isNotEmpty) {
-              if (rawCatName.trim().toLowerCase() == 'trending') {
-                result['HeroBanner'] = list.where((item) => item.overview != null && item.overview!.trim().isNotEmpty).toList();
-                result['Trending'] = list;
-                final sig = list.map((e) => e.movieboxSubjectId ?? e.title ?? '').take(5).join('|');
+            for (final cat in categories) {
+              final rawCatName = cat['name']?.toString() ?? 'Unknown';
+              final results = cat['results'] as List?;
+              if (results == null || results.isEmpty) continue;
+
+              final list = <TmdbItem>[];
+              for (final item in results) {
+                final sid = item['subjectId']?.toString();
+                if (sid == null) continue;
+                final subjectType =
+                    item['subjectType'] ?? (item['type'] == 'TvSeries' ? 2 : 1);
+                final isTv =
+                    tab == 'TV' ||
+                    subjectType == 2 ||
+                    subjectType == 7 ||
+                    item['type'] == 'TvSeries' ||
+                    item['type']?.toString().toLowerCase() == 'tv' ||
+                    item['type']?.toString().toLowerCase() == 'series';
+                final mediaType = isTv ? 'tv' : 'movie';
+
+                list.add(
+                  TmdbItem(
+                    id: item['tmdb_id'] ?? 0,
+                    mediaType: mediaType,
+                    title: item['title']?.toString() ?? '',
+                    posterPath: item['poster'] ?? item['posterUrl'],
+                    backdropPath: item['background'] ?? item['posterUrl'],
+                    logoPath: item['logo'],
+                    overview: item['plot'],
+                    releaseDate: item['year']?.toString(),
+                    voteAverage: double.tryParse(
+                      item['score']?.toString() ??
+                          item['rating']?.toString() ??
+                          '0',
+                    ),
+                    movieboxSubjectId: sid,
+                  ),
+                );
+              }
+
+              if (list.isNotEmpty) {
+                if (rawCatName.trim().toLowerCase() == 'trending') {
+                  final bannerList = list
+                      .where(
+                        (item) =>
+                            item.overview != null &&
+                            item.overview!.trim().isNotEmpty,
+                      )
+                      .toList();
+                  result['HeroBanner'] =
+                      bannerList.isNotEmpty ? bannerList : list;
+                  final trendingTitle = tab == 'TV'
+                      ? 'Trending Series'
+                      : (tab == 'Movies' ? 'Trending Movies' : 'Trending');
+                  result[trendingTitle] = list;
+                  final sig = list
+                      .map((e) => e.movieboxSubjectId ?? e.title ?? '')
+                      .take(5)
+                      .join('|');
+                  seenSignatures.add(sig);
+                  continue;
+                }
+
+                // Detect duplicate categories (where server returned fallback duplicate list)
+                final sig = list
+                    .map((e) => e.movieboxSubjectId ?? e.title ?? '')
+                    .take(5)
+                    .join('|');
+                if (seenSignatures.contains(sig)) {
+                  // Skip duplicate content category (e.g. broken channel IDs falling back to generic lists)
+                  continue;
+                }
                 seenSignatures.add(sig);
-                continue;
+
+                // Normalize category name for clean UI
+                String catName = rawCatName.trim();
+                if (tab == 'TV') {
+                  if (catName == 'Popular') {
+                    catName = 'Popular Series';
+                  } else if (catName == 'Top Rated') {
+                    catName = 'Top Rated Series';
+                  } else if (catName == 'Comedy') {
+                    catName = 'Comedy Series';
+                  } else if (catName == 'Drama') {
+                    catName = 'Drama Series';
+                  } else if (catName == 'Crime') {
+                    catName = 'Crime Series';
+                  } else if (catName == 'Reality') {
+                    catName = 'Reality TV';
+                  } else if (catName == 'Documentary') {
+                    catName = 'Documentary Series';
+                  } else if (catName == 'Animation') {
+                    catName = 'Animated Series';
+                  }
+                }
+                if (catName == 'Anime (List)')
+                  catName = 'Anime';
+                else if (catName == 'Indian (Movies)')
+                  catName = 'Indian Movies';
+                else if (catName == 'Indian (Series)')
+                  catName = 'Indian Series';
+                else if (catName == 'USA (Movies)')
+                  catName = 'Hollywood Movies';
+                else if (catName == 'USA (Series)')
+                  catName = 'Western Series';
+                else if (catName == 'Japan (Movies)')
+                  catName = 'Japanese Movies';
+                else if (catName == 'Japan (Series)')
+                  catName = 'Japanese Series';
+                else if (catName == 'China (Movies)')
+                  catName = 'Chinese Movies';
+                else if (catName == 'China (Series)')
+                  catName = 'Chinese Drama';
+                else if (catName == 'South Korean (Movies)')
+                  catName = 'Korean Movies';
+                else if (catName == 'South Korean (Series)')
+                  catName = 'Korean Drama';
+                else if (catName == 'Philippines (Movies)')
+                  catName = 'Filipino Movies';
+                else if (catName == 'Philippines (Series)')
+                  catName = 'Filipino Series';
+                else if (catName == 'Thailand (Movies)')
+                  catName = 'Thai Movies';
+                else if (catName == 'Thailand (Series)')
+                  catName = 'Thai Series';
+                else if (catName == 'Nollywood (Movies)')
+                  catName = 'Nollywood Movies';
+                else if (catName == 'Nollywood (Series)')
+                  catName = 'Nollywood Series';
+                else if (catName == 'Action (Movies)')
+                  catName = 'Action Movies';
+                else if (catName == 'Crime (Movies)')
+                  catName = 'Crime Movies';
+                else if (catName == 'Comedy (Movies)')
+                  catName = 'Comedy Movies';
+                else if (catName == 'Romance (Movies)')
+                  catName = 'Romance Movies';
+                else if (catName == 'Crime (Series)')
+                  catName = 'Crime Series';
+                else if (catName == 'Comedy (Series)')
+                  catName = 'Comedy Series';
+                else if (catName == 'Romance (Series)')
+                  catName = 'Romance Series';
+
+                if (!result.containsKey(catName)) {
+                  result[catName] = list;
+                }
               }
-
-              // Detect duplicate categories (where server returned fallback duplicate list)
-              final sig = list.map((e) => e.movieboxSubjectId ?? e.title ?? '').take(5).join('|');
-              if (seenSignatures.contains(sig)) {
-                // Skip duplicate content category (e.g. broken channel IDs falling back to generic lists)
-                continue;
+            }
+          } else {
+            // Fallback for legacy endpoints (/movie, /animation, /tv)
+            final data = body['data'] ?? body;
+            List items = [];
+            if (data['items'] != null) {
+              items = data['items'];
+            } else if (data['subjects'] != null) {
+              items = data['subjects'];
+            } else if (data['operatingList'] != null) {
+              for (final op in data['operatingList']) {
+                if (op['subjects'] != null) items.addAll(op['subjects']);
+                if (op['banner']?['items'] != null)
+                  items.addAll(op['banner']['items']);
               }
-              seenSignatures.add(sig);
+            }
 
-              // Normalize category name for clean UI
-              String catName = rawCatName.trim();
-              if (catName == 'Anime (List)') catName = 'Anime';
-              else if (catName == 'Indian (Movies)') catName = 'Indian Movies';
-              else if (catName == 'Indian (Series)') catName = 'Indian Series';
-              else if (catName == 'USA (Movies)') catName = 'Hollywood Movies';
-              else if (catName == 'USA (Series)') catName = 'Western Series';
-              else if (catName == 'Japan (Movies)') catName = 'Japanese Movies';
-              else if (catName == 'Japan (Series)') catName = 'Japanese Series';
-              else if (catName == 'China (Movies)') catName = 'Chinese Movies';
-              else if (catName == 'China (Series)') catName = 'Chinese Drama';
-              else if (catName == 'South Korean (Movies)') catName = 'Korean Movies';
-              else if (catName == 'South Korean (Series)') catName = 'Korean Drama';
-              else if (catName == 'Philippines (Movies)') catName = 'Filipino Movies';
-              else if (catName == 'Philippines (Series)') catName = 'Filipino Series';
-              else if (catName == 'Thailand (Movies)') catName = 'Thai Movies';
-              else if (catName == 'Thailand (Series)') catName = 'Thai Series';
-              else if (catName == 'Nollywood (Movies)') catName = 'Nollywood Movies';
-              else if (catName == 'Nollywood (Series)') catName = 'Nollywood Series';
-              else if (catName == 'Action (Movies)') catName = 'Action Movies';
-              else if (catName == 'Crime (Movies)') catName = 'Crime Movies';
-              else if (catName == 'Comedy (Movies)') catName = 'Comedy Movies';
-              else if (catName == 'Romance (Movies)') catName = 'Romance Movies';
-              else if (catName == 'Crime (Series)') catName = 'Crime Series';
-              else if (catName == 'Comedy (Series)') catName = 'Comedy Series';
-              else if (catName == 'Romance (Series)') catName = 'Romance Series';
+            if (items.isNotEmpty) {
+              final list = <TmdbItem>[];
+              for (final item in items) {
+                final sid = item['subjectId']?.toString();
+                if (sid == null) continue;
+                final subjectType = item['subjectType'] ?? 1;
+                final isTv = subjectType == 2 || subjectType == 7;
 
-              if (!result.containsKey(catName)) {
-                result[catName] = list;
+                list.add(
+                  TmdbItem(
+                    id: 0,
+                    mediaType: isTv ? 'tv' : 'movie',
+                    title: item['title']?.toString() ?? '',
+                    posterPath: item['cover']?['url'] ?? item['image']?['url'],
+                    backdropPath:
+                        item['cover']?['url'] ?? item['image']?['url'],
+                    voteAverage: double.tryParse(
+                      item['imdbRatingValue']?.toString() ?? '0',
+                    ),
+                    releaseDate: item['releaseDate'],
+                    movieboxSubjectId: sid,
+                  ),
+                );
+              }
+              if (list.isNotEmpty) {
+                result[tab] = list;
               }
             }
           }
-        } else {
-          // Fallback for legacy endpoints (/movie, /animation, /tv)
-          final data = body['data'] ?? body;
-          List items = [];
-          if (data['items'] != null) {
-            items = data['items'];
-          } else if (data['subjects'] != null) {
-            items = data['subjects'];
-          } else if (data['operatingList'] != null) {
-            for (final op in data['operatingList']) {
-              if (op['subjects'] != null) items.addAll(op['subjects']);
-              if (op['banner']?['items'] != null) items.addAll(op['banner']['items']);
-            }
-          }
 
-          if (items.isNotEmpty) {
-            final list = <TmdbItem>[];
-            for (final item in items) {
-              final sid = item['subjectId']?.toString();
-              if (sid == null) continue;
-              final subjectType = item['subjectType'] ?? 1;
-              final isTv = subjectType == 2 || subjectType == 7;
-              
-              list.add(
-                TmdbItem(
-                  id: 0,
-                  mediaType: isTv ? 'tv' : 'movie',
-                  title: item['title']?.toString() ?? '',
-                  posterPath: item['cover']?['url'] ?? item['image']?['url'],
-                  backdropPath: item['cover']?['url'] ?? item['image']?['url'],
-                  voteAverage: double.tryParse(item['imdbRatingValue']?.toString() ?? '0'),
-                  releaseDate: item['releaseDate'],
-                  movieboxSubjectId: sid,
-                ),
-              );
-            }
-            if (list.isNotEmpty) {
-              result[tab] = list;
-            }
+          if (result.isNotEmpty) {
+            _tabSectionsCache[tab] = result;
+            return result;
           }
         }
+      } catch (e) {
+        if (kDebugMode)
+          debugPrint('Primebox API error (attempt $attempt/$maxAttempts): $e');
+        if (attempt < maxAttempts) {
+          await Future.delayed(const Duration(milliseconds: 1500));
+        }
       }
-    } catch (e) {
-      if (kDebugMode) debugPrint('Primebox API error: $e');
     }
 
-    return result;
+    // Graceful Fallbacks:
+    // 1. Previous cache for this tab
+    if (_tabSectionsCache.containsKey(tab) &&
+        _tabSectionsCache[tab]!.isNotEmpty) {
+      return _tabSectionsCache[tab]!;
+    }
+
+    // 2. Fallback to Home sections if available (builder automatically filters by tab)
+    if (tab != 'Home' &&
+        _tabSectionsCache.containsKey('Home') &&
+        _tabSectionsCache['Home']!.isNotEmpty) {
+      return _tabSectionsCache['Home']!;
+    }
+
+    return const {};
   }
 
   @override
@@ -505,329 +601,580 @@ class _MovieHomePageState extends State<MovieHomePage>
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isDesktop = _isDesktop;
-    return Scaffold(
-      backgroundColor: const Color.fromARGB(255, 17, 17, 17),
-      body: Stack(
-        children: [
-          // Background Color Block with smooth gradient to prevent mismatch during top bouncing overscroll
-          if (!isDesktop)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              height: 300,
-              child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.black, Color.fromARGB(255, 17, 17, 17)],
+  void _exitApp() {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      exit(0);
+    } else {
+      SystemNavigator.pop();
+    }
+  }
+
+  Future<bool?> _showExitConfirmationDialog(BuildContext context) {
+    bool doNotShowAgain = false;
+
+    return showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.75),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF16181F).withValues(alpha: 0.95),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.6),
+                          blurRadius: 32,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    padding: const EdgeInsets.fromLTRB(22, 24, 22, 20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Icon header
+                        Container(
+                          width: 54,
+                          height: 54,
+                          decoration: BoxDecoration(
+                            color: const Color(
+                              0xFFFFB561,
+                            ).withValues(alpha: 0.12),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: const Color(
+                                0xFFFFB561,
+                              ).withValues(alpha: 0.25),
+                              width: 1.5,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.exit_to_app_rounded,
+                            color: Color(0xFFFFB561),
+                            size: 26,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Title
+                        const Text(
+                          'Exit Lumino?',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        // Subtitle
+                        Text(
+                          'Are you sure you want to close the application?',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.6),
+                            fontSize: 13.5,
+                            height: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+
+                        // "Don't show again" checkbox row
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () {
+                              setDialogState(() {
+                                doNotShowAgain = !doNotShowAgain;
+                              });
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 4,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: Checkbox(
+                                      value: doNotShowAgain,
+                                      activeColor: const Color(0xFFFFB561),
+                                      checkColor: Colors.black,
+                                      side: BorderSide(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.35,
+                                        ),
+                                        width: 1.5,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(5),
+                                      ),
+                                      onChanged: (val) {
+                                        setDialogState(() {
+                                          doNotShowAgain = val ?? false;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    "Don't show this again",
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.75,
+                                      ),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Buttons
+                        Row(
+                          children: [
+                            Expanded(
+                              child: SizedBox(
+                                height: 42,
+                                child: OutlinedButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.white70,
+                                    side: BorderSide(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.12,
+                                      ),
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Cancel',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13.5,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: SizedBox(
+                                height: 42,
+                                child: FilledButton(
+                                  onPressed: () {
+                                    if (doNotShowAgain) {
+                                      LayoutSettingsService().update(
+                                        LayoutSettingsService().current
+                                            .copyWith(confirmExitApp: false),
+                                      );
+                                    }
+                                    Navigator.pop(ctx, true);
+                                  },
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xFFFFB561),
+                                    foregroundColor: Colors.black,
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Exit',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13.5,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          // Dynamic Background
-          ScrollConfiguration(
-            behavior: const _AppScrollBehavior(),
-            child: FutureBuilder<Map<String, List<TmdbItem>>>(
-              future: _sectionsFuture,
-              builder: (context, snap) {
-                if (snap.connectionState != ConnectionState.done) {
-                  return const Center(child: AppLoader(size: 300));
-                }
+            );
+          },
+        );
+      },
+    );
+  }
 
-                if (!_isOnline || !snap.hasData || snap.data!.isEmpty) {
-                  return _NoNetworkState(
-                    onRetry: () {
-                      setState(() {
-                        _sectionsFuture = _fetchAllSections(_selectedTab);
-                      });
-                    },
-                  );
-                }
-
-                final allData = snap.data!;
-                final Map<String, List<TmdbItem>> data = {};
-
-                if (_selectedTab == 'Home') {
-                  data.addAll(allData);
-                } else if (_selectedTab == 'Movies') {
-                  data.addAll(
-                    Map.fromEntries(
-                      allData.entries.where(
-                        (e) =>
-                            e.key == 'HeroBanner' ||
-                            e.key.toLowerCase().contains('movie') ||
-                            e.key == 'Trending in Cinema' ||
-                            e.key == 'Bollywood' ||
-                            e.key == 'South Indian' ||
-                            e.key == 'Hollywood' ||
-                            (!e.key.toLowerCase().contains('series') && !e.key.toLowerCase().contains('drama')),
-                      ),
+  @override
+  Widget build(BuildContext context) {
+    final isDesktop = _isDesktop;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final layoutSettings = LayoutSettingsService().current;
+        if (!layoutSettings.confirmExitApp) {
+          _exitApp();
+          return;
+        }
+        final shouldExit = await _showExitConfirmationDialog(context);
+        if (shouldExit == true) {
+          _exitApp();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color.fromARGB(255, 17, 17, 17),
+        body: Stack(
+          children: [
+            // Background Color Block with smooth gradient to prevent mismatch during top bouncing overscroll
+            if (!isDesktop)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 300,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.black, Color.fromARGB(255, 17, 17, 17)],
                     ),
-                  );
-                } else if (_selectedTab == 'TV') {
-                  // Include HeroBanner + anything containing 'tv', 'series', or 'drama'
-                  data.addAll(
-                    Map.fromEntries(
-                      allData.entries.where(
-                        (e) =>
-                            e.key == 'HeroBanner' ||
-                            e.key.toLowerCase().contains('tv') ||
-                            e.key.toLowerCase().contains('series') ||
-                            e.key.toLowerCase().contains('drama'),
-                      ),
-                    ),
-                  );
-                } else if (_selectedTab == 'Anime') {
-                  data.addAll(
-                    Map.fromEntries(
-                      allData.entries.where(
-                        (e) =>
-                            e.key == 'HeroBanner' ||
-                            e.key.toLowerCase().contains('anime') ||
-                            e.key.toLowerCase().contains('japan'),
-                      ),
-                    ),
-                  );
-                }
+                  ),
+                ),
+              ),
+            // Dynamic Background
+            ScrollConfiguration(
+              behavior: const _AppScrollBehavior(),
+              child: FutureBuilder<Map<String, List<TmdbItem>>>(
+                future: _sectionsFuture,
+                builder: (context, snap) {
+                  if (snap.connectionState != ConnectionState.done) {
+                    return const Center(child: AppLoader(size: 300));
+                  }
 
-                // Robust lookup for Top Series (Case-insensitive)
-                final topSeriesKey = data.keys.firstWhere(
-                  (k) => k.toLowerCase().contains('top series'),
-                  orElse: () => '',
-                );
+                  if (!_isOnline || !snap.hasData || snap.data!.isEmpty) {
+                    return _NoNetworkState(
+                      onRetry: () {
+                        setState(() {
+                          _sectionsFuture = _fetchAllSections(
+                            _selectedTab,
+                            forceRefresh: true,
+                          );
+                        });
+                      },
+                    );
+                  }
 
-                final heroSource =
-                    (_selectedTab == 'TV' && topSeriesKey.isNotEmpty)
-                    ? data[topSeriesKey]!
-                    : (data.containsKey('HeroBanner')
-                          ? data['HeroBanner']!
+                  final allData = snap.data!;
+                  final Map<String, List<TmdbItem>> data = {};
+
+                  // If allData is a fallback to Home cache, we filter for tab-specific items.
+                  // Otherwise, allData is the dedicated response from the tab's endpoint (/tv, /movie, /animation)
+                  // and ALL its categories should be displayed!
+                  final isFallbackHome = _selectedTab != 'Home' &&
+                      _tabSectionsCache.containsKey('Home') &&
+                      identical(allData, _tabSectionsCache['Home']);
+
+                  if (_selectedTab == 'Home' || !isFallbackHome) {
+                    data.addAll(allData);
+                  } else if (_selectedTab == 'Movies') {
+                    data.addAll(
+                      Map.fromEntries(
+                        allData.entries.where(
+                          (e) =>
+                              e.key == 'HeroBanner' ||
+                              e.key.toLowerCase().contains('movie') ||
+                              e.key == 'Trending in Cinema' ||
+                              e.key == 'Bollywood' ||
+                              e.key == 'South Indian' ||
+                              e.key == 'Hollywood',
+                        ),
+                      ),
+                    );
+                  } else if (_selectedTab == 'TV') {
+                    data.addAll(
+                      Map.fromEntries(
+                        allData.entries.where(
+                          (e) =>
+                              e.key == 'HeroBanner' ||
+                              e.key.toLowerCase().contains('tv') ||
+                              e.key.toLowerCase().contains('series') ||
+                              e.key.toLowerCase().contains('drama') ||
+                              e.key == 'Airing Today' ||
+                              e.key == 'On The Air',
+                        ),
+                      ),
+                    );
+                  } else if (_selectedTab == 'Anime') {
+                    data.addAll(
+                      Map.fromEntries(
+                        allData.entries.where(
+                          (e) =>
+                              e.key == 'HeroBanner' ||
+                              e.key.toLowerCase().contains('anime') ||
+                              e.key.toLowerCase().contains('japan'),
+                        ),
+                      ),
+                    );
+                  }
+
+                  // Robust lookup for Top Series / Top Rated (Case-insensitive)
+                  final topSeriesKey = data.keys.firstWhere(
+                    (k) =>
+                        k.toLowerCase().contains('top series') ||
+                        k.toLowerCase().contains('top rated series'),
+                    orElse: () => '',
+                  );
+
+                  final heroSource = data.containsKey('HeroBanner') &&
+                          data['HeroBanner']!.isNotEmpty
+                      ? data['HeroBanner']!
+                      : ((_selectedTab == 'TV' && topSeriesKey.isNotEmpty)
+                          ? data[topSeriesKey]!
                           : (data.isNotEmpty
-                                ? data.values.firstWhere(
-                                    (l) => l.isNotEmpty,
-                                    orElse: () => const <TmdbItem>[],
-                                  )
-                                : const <TmdbItem>[]));
-                final heroItems = heroSource.where((item) => item.overview != null && item.overview!.trim().isNotEmpty).take(8).toList();
-                final entries = data.entries
-                    .where((e) => e.key != 'HeroBanner')
-                    .toList();
+                              ? data.values.firstWhere(
+                                  (l) => l.isNotEmpty,
+                                  orElse: () => const <TmdbItem>[],
+                                )
+                              : const <TmdbItem>[]));
+                  final heroItems = heroSource
+                      .where(
+                        (item) =>
+                            item.overview != null &&
+                            item.overview!.trim().isNotEmpty,
+                      )
+                      .take(8)
+                      .toList();
+                  final entries = data.entries
+                      .where((e) => e.key != 'HeroBanner')
+                      .toList();
 
-                return AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 400),
-                  switchInCurve: Curves.easeOut,
-                  switchOutCurve: Curves.easeIn,
-                  child: CustomScrollView(
-                    key: ValueKey(_selectedTab),
-                    physics: const BouncingScrollPhysics(),
-                    slivers: [
-                      // Mobile Top Bar (LUMINO Title) that scrolls with the content
-                      if (!isDesktop)
-                        SliverToBoxAdapter(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  Colors.black.withValues(alpha: 0.8),
-                                  Colors.black.withValues(alpha: 0.4),
-                                  Colors.transparent,
-                                ],
-                                stops: const [0.0, 0.5, 1.0],
-                              ),
-                            ),
-                            child: SafeArea(
-                              bottom: false,
-                              child: Padding(
-                                padding: const EdgeInsets.only(
-                                  top: 10.0,
-                                  bottom: 24.0,
+                  return AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 400),
+                    switchInCurve: Curves.easeOut,
+                    switchOutCurve: Curves.easeIn,
+                    child: CustomScrollView(
+                      key: ValueKey(_selectedTab),
+                      physics: const BouncingScrollPhysics(),
+                      slivers: [
+                        // Mobile Top Bar (LUMINO Title) that scrolls with the content
+                        if (!isDesktop)
+                          SliverToBoxAdapter(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.black.withValues(alpha: 0.8),
+                                    Colors.black.withValues(alpha: 0.4),
+                                    Colors.transparent,
+                                  ],
+                                  stops: const [0.0, 0.5, 1.0],
                                 ),
-                                child: Center(
-                                  child: Text(
-                                    'LUMINO',
-                                    style: GoogleFonts.outfit(
-                                      color: const Color(0xFFFFB561),
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w900,
-                                      letterSpacing: 4.0,
+                              ),
+                              child: SafeArea(
+                                bottom: false,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(
+                                    top: 10.0,
+                                    bottom: 24.0,
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      'LUMINO',
+                                      style: GoogleFonts.outfit(
+                                        color: const Color(0xFFFFB561),
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 4.0,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
 
-                      // Hero Section
-                      if (heroItems.isNotEmpty)
-                        SliverToBoxAdapter(
-                          child: _ModernHeroCarousel(
-                            items: heroItems,
-                            imgBase: imgW780,
-                            apiKey: apiKey,
-                            base: base,
-                            imgW185: 'https://image.tmdb.org/t/p/w185',
-                            imgW500: imgW500,
-                            imgW780: imgW780,
-                            isDesktop: isDesktop,
-                            onReturn: _loadHistory,
-                          ),
-                        ),
-
-                      // Continue Watching
-                      if (_history.isNotEmpty)
-                        SliverToBoxAdapter(
-                          child: _ModernContinueWatching(
-                            items: _history,
-                            apiKey: apiKey,
-                            base: base,
-                            imgW185: 'https://image.tmdb.org/t/p/w185',
-                            imgW500: imgW500,
-                            imgW780: imgW780,
-                            isDesktop: isDesktop,
-                            onRefresh: _loadHistory,
-                          ),
-                        ),
-
-                      // Live TV Promo Banner
-                      SliverToBoxAdapter(
-                        child: _ModernLiveTvPromo(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const LiveTvPage(),
-                              ),
-                            );
-                          },
-                          isDesktop: isDesktop,
-                        ),
-                      ),
-
-                      // Content Sections
-                      SliverList(
-                        delegate: SliverChildBuilderDelegate((context, i) {
-                          final entry = entries[i];
-                          return _ModernHorizontalSection(
-                            title: entry.key,
-                            items: entry.value,
-                            imgBase: imgW500,
-                            apiKey: apiKey,
-                            base: base,
-                            imgW185: 'https://image.tmdb.org/t/p/w185',
-                            imgW500: imgW500,
-                            imgW780: imgW780,
-                            isDesktop: isDesktop,
-                            onReturn: _loadHistory,
-                          );
-                        }, childCount: entries.length),
-                      ),
-                      const SliverToBoxAdapter(child: SizedBox(height: 120)),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-
-          Positioned(
-            bottom: isDesktop ? 32 : 24,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              child: Center(
-                child: _FloatingNavBar(
-                  selectedTab: _selectedTab,
-                  onTabSelected: (tab) {
-                    if (_selectedTab == tab) return;
-                    setState(() {
-                      _selectedTab = tab;
-                      _sectionsFuture = _fetchAllSections(tab);
-                    });
-                  },
-                  onSearch: () {
-                    Navigator.push(
-                      context,
-                      PageRouteBuilder(
-                        pageBuilder: (context, animation, secondaryAnimation) =>
-                            SearchPage(
+                        // Hero Section
+                        if (heroItems.isNotEmpty)
+                          SliverToBoxAdapter(
+                            child: _ModernHeroCarousel(
+                              items: heroItems,
+                              imgBase: imgW780,
                               apiKey: apiKey,
                               base: base,
-                              imgW185: imgW500,
+                              imgW185: 'https://image.tmdb.org/t/p/w185',
                               imgW500: imgW500,
                               imgW780: imgW780,
-                              initialQuery: '',
+                              isDesktop: isDesktop,
+                              onReturn: _loadHistory,
                             ),
-                        transitionsBuilder:
-                            (context, animation, secondaryAnimation, child) {
-                              const curve = Curves.easeOutQuart;
-                              var fadeAnimation = animation.drive(
-                                CurveTween(curve: Curves.easeIn),
-                              );
-                              var scaleAnimation = animation.drive(
-                                Tween(
-                                  begin: 0.95,
-                                  end: 1.0,
-                                ).chain(CurveTween(curve: curve)),
-                              );
+                          ),
 
-                              return FadeTransition(
-                                opacity: fadeAnimation,
-                                child: ScaleTransition(
-                                  scale: scaleAnimation,
-                                  child: child,
-                                ),
-                              );
-                            },
-                        transitionDuration: const Duration(milliseconds: 400),
-                      ),
-                    );
-                  },
-                  onDownloads: () {
-                    Navigator.push(
-                      context,
-                      PageRouteBuilder(
-                        pageBuilder: (context, animation, secondaryAnimation) =>
-                            const MyDownloadsPage(),
-                        transitionsBuilder:
-                            (context, animation, secondaryAnimation, child) {
-                              const begin = Offset(0.0, 0.05);
-                              const end = Offset.zero;
-                              const curve = Curves.easeOutQuart;
-                              var tween = Tween(
-                                begin: begin,
-                                end: end,
-                              ).chain(CurveTween(curve: curve));
-                              var offsetAnimation = animation.drive(tween);
-                              var fadeAnimation = animation.drive(
-                                CurveTween(curve: Curves.easeIn),
-                              );
+                        // Continue Watching
+                        if (_history.isNotEmpty)
+                          SliverToBoxAdapter(
+                            child: _ModernContinueWatching(
+                              items: _history,
+                              apiKey: apiKey,
+                              base: base,
+                              imgW185: 'https://image.tmdb.org/t/p/w185',
+                              imgW500: imgW500,
+                              imgW780: imgW780,
+                              isDesktop: isDesktop,
+                              onRefresh: _loadHistory,
+                            ),
+                          ),
 
-                              return FadeTransition(
-                                opacity: fadeAnimation,
-                                child: SlideTransition(
-                                  position: offsetAnimation,
-                                  child: child,
-                                ),
-                              );
-                            },
-                        transitionDuration: const Duration(milliseconds: 500),
-                      ),
-                    );
-                  },
-                  onTapUpdate: _openCheckUpdateScreen,
-                  isDesktop: isDesktop,
+
+                        // Content Sections
+                        SliverList(
+                          delegate: SliverChildBuilderDelegate((context, i) {
+                            final entry = entries[i];
+                            return _ModernHorizontalSection(
+                              title: entry.key,
+                              items: entry.value,
+                              imgBase: imgW500,
+                              apiKey: apiKey,
+                              base: base,
+                              imgW185: 'https://image.tmdb.org/t/p/w185',
+                              imgW500: imgW500,
+                              imgW780: imgW780,
+                              isDesktop: isDesktop,
+                              onReturn: _loadHistory,
+                            );
+                          }, childCount: entries.length),
+                        ),
+                        const SliverToBoxAdapter(child: SizedBox(height: 120)),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+
+            Positioned(
+              bottom: isDesktop ? 32 : 24,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                child: Center(
+                  child: _FloatingNavBar(
+                    selectedTab: _selectedTab,
+                    onTabSelected: (tab) {
+                      if (_selectedTab == tab) return;
+                      setState(() {
+                        _selectedTab = tab;
+                        _sectionsFuture = _fetchAllSections(tab);
+                      });
+                    },
+                    onSearch: () {
+                      Navigator.push(
+                        context,
+                        PageRouteBuilder(
+                          pageBuilder:
+                              (context, animation, secondaryAnimation) =>
+                                  SearchPage(
+                                    apiKey: apiKey,
+                                    base: base,
+                                    imgW185: imgW500,
+                                    imgW500: imgW500,
+                                    imgW780: imgW780,
+                                    initialQuery: '',
+                                  ),
+                          transitionsBuilder:
+                              (context, animation, secondaryAnimation, child) {
+                                const curve = Curves.easeOutCubic;
+                                var fadeAnimation = animation.drive(
+                                  CurveTween(curve: Curves.easeOut),
+                                );
+                                var scaleAnimation = animation.drive(
+                                  Tween(
+                                    begin: 0.96,
+                                    end: 1.0,
+                                  ).chain(CurveTween(curve: curve)),
+                                );
+
+                                return FadeTransition(
+                                  opacity: fadeAnimation,
+                                  child: ScaleTransition(
+                                    scale: scaleAnimation,
+                                    child: child,
+                                  ),
+                                );
+                              },
+                          transitionDuration: const Duration(milliseconds: 380),
+                          reverseTransitionDuration:
+                              const Duration(milliseconds: 280),
+                        ),
+                      );
+                    },
+                    onDownloads: () {
+                      Navigator.push(
+                        context,
+                        PageRouteBuilder(
+                          pageBuilder:
+                              (context, animation, secondaryAnimation) =>
+                                  const MyDownloadsPage(),
+                          transitionsBuilder:
+                              (context, animation, secondaryAnimation, child) {
+                                const begin = Offset(0.0, 0.05);
+                                const end = Offset.zero;
+                                const curve = Curves.easeOutQuart;
+                                var tween = Tween(
+                                  begin: begin,
+                                  end: end,
+                                ).chain(CurveTween(curve: curve));
+                                var offsetAnimation = animation.drive(tween);
+                                var fadeAnimation = animation.drive(
+                                  CurveTween(curve: Curves.easeIn),
+                                );
+
+                                return FadeTransition(
+                                  opacity: fadeAnimation,
+                                  child: SlideTransition(
+                                    position: offsetAnimation,
+                                    child: child,
+                                  ),
+                                );
+                              },
+                          transitionDuration: const Duration(milliseconds: 500),
+                        ),
+                      );
+                    },
+                    onTapUpdate: _openCheckUpdateScreen,
+                    isDesktop: isDesktop,
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -868,7 +1215,10 @@ class _FloatingNavBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.15), width: 1.5),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.15),
+          width: 1.5,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.4),
@@ -1107,10 +1457,13 @@ class _FloatingNavBar extends StatelessWidget {
       icon: isSearch
           ? Hero(
               tag: 'search-icon',
-              child: HugeIcon(
-                icon: iconNode,
-                color: Colors.white.withValues(alpha: 0.55),
-                size: isDesktop ? 22.0 : (isVerySmall ? 19.0 : 21.0),
+              child: Material(
+                type: MaterialType.transparency,
+                child: HugeIcon(
+                  icon: iconNode,
+                  color: Colors.white.withValues(alpha: 0.55),
+                  size: isDesktop ? 22.0 : (isVerySmall ? 19.0 : 21.0),
+                ),
               ),
             )
           : HugeIcon(
@@ -1399,7 +1752,6 @@ class _ModernHeroCarouselState extends State<_ModernHeroCarousel> {
   }
 }
 
-
 class _ModernHeroCard extends StatefulWidget {
   final TmdbItem item;
   final bool isCenter;
@@ -1429,7 +1781,6 @@ class _ModernHeroCard extends StatefulWidget {
 }
 
 class _ModernHeroCardState extends State<_ModernHeroCard> {
-
   @override
   Widget build(BuildContext context) {
     if (widget.isDesktop) {
@@ -1442,7 +1793,7 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
     final enriched = widget.item;
 
     final img = enriched.backdropPath ?? enriched.posterPath;
-    if (img == null) return Container(color: const Color(0xFF141414));
+    if (img == null || img.trim().isEmpty) return Container(color: const Color(0xFF141414));
 
     final imageUrl = img.startsWith('http')
         ? img
@@ -1487,10 +1838,14 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
                 end: Alignment.centerRight,
                 colors: [
                   const Color(0xFF141414), // Solid base at left edge
-                  const Color(0xFF141414).withValues(alpha: 0.8), // Text readability
+                  const Color(
+                    0xFF141414,
+                  ).withValues(alpha: 0.8), // Text readability
                   Colors.transparent, // Center is visible
                   Colors.transparent, // Center is visible
-                  const Color(0xFF141414).withValues(alpha: 0.8), // Right edge blending
+                  const Color(
+                    0xFF141414,
+                  ).withValues(alpha: 0.8), // Right edge blending
                   const Color(0xFF141414), // Solid base at right edge
                 ],
                 stops: const [0.0, 0.15, 0.4, 0.6, 0.85, 1.0],
@@ -1520,14 +1875,29 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
                           duration: const Duration(milliseconds: 300),
                           switchInCurve: Curves.easeOut,
                           switchOutCurve: Curves.easeIn,
-                          child: enriched.logoPath != null
-                              ? CachedNetworkImage(
+                          child: (enriched.logoPath != null &&
+                                  enriched.logoPath!.trim().isNotEmpty)
+                              ? AppLogoWidget(
                                   key: const ValueKey('logo'),
-                                  imageUrl: enriched.logoPath!,
+                                  url: enriched.logoPath!,
                                   fit: BoxFit.contain,
                                   alignment: Alignment.bottomLeft,
                                   memCacheHeight: 400,
-                                  placeholder: (_, _) => const SizedBox.shrink(),
+                                  placeholder: const SizedBox.shrink(),
+                                  errorBuilder: (_) => Padding(
+                                    key: const ValueKey('text'),
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: Text(
+                                      enriched.displayTitle,
+                                      style: GoogleFonts.outfit(
+                                        color: Colors.white,
+                                        fontSize: 52,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -1.5,
+                                        height: 1.1,
+                                      ),
+                                    ),
+                                  ),
                                 )
                               : Padding(
                                   key: const ValueKey('text'),
@@ -1546,7 +1916,7 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      
+
                       // 4c. Metadata Row
                       SizedBox(
                         height: 30,
@@ -1584,8 +1954,8 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
                             _dot(),
                             const SizedBox(width: 16),
                             Text(
-                              enriched.mediaType.toString()[0].toUpperCase() + 
-                              enriched.mediaType.toString().substring(1),
+                              enriched.mediaType.toString()[0].toUpperCase() +
+                                  enriched.mediaType.toString().substring(1),
                               style: GoogleFonts.outfit(
                                 color: Colors.white,
                                 fontSize: 18,
@@ -1610,7 +1980,7 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
                         ),
                       ),
                       const SizedBox(height: 20),
-                      
+
                       // 4b. Synopsis
                       SizedBox(
                         width: 700,
@@ -1627,7 +1997,7 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
                         ),
                       ),
                       const SizedBox(height: 40),
-                      
+
                       // 4a. Actions
                       _buildCinematicButton(
                         context,
@@ -1653,7 +2023,7 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
     final enriched = widget.item;
     final img = enriched.posterPath ?? enriched.backdropPath;
 
-    if (img == null) {
+    if (img == null || img.trim().isEmpty) {
       return Container(
         margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
         decoration: BoxDecoration(
@@ -1672,7 +2042,10 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
           border: widget.isCenter
-              ? Border.all(color: Colors.white.withValues(alpha: 0.25), width: 1.2)
+              ? Border.all(
+                  color: Colors.white.withValues(alpha: 0.25),
+                  width: 1.2,
+                )
               : null,
           boxShadow: [
             BoxShadow(
@@ -1718,16 +2091,28 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     // Unified Logo/Title inside the card state
-                    widget.item.logoPath != null
+                    (widget.item.logoPath != null &&
+                            widget.item.logoPath!.trim().isNotEmpty)
                         ? Container(
                             constraints: BoxConstraints(
                               maxWidth: isSmallScreen ? 180 : 280,
                               maxHeight: isSmallScreen ? 60 : 80,
                             ),
-                            child: CachedNetworkImage(
-                              imageUrl: widget.item.logoPath!,
+                            child: AppLogoWidget(
+                              url: widget.item.logoPath!,
                               fit: BoxFit.contain,
                               alignment: Alignment.bottomLeft,
+                              placeholder: const SizedBox.shrink(),
+                              errorBuilder: (_) => Text(
+                                widget.item.displayTitle,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: isSmallScreen ? 20 : 24,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
                             ),
                           )
                         : Text(
@@ -1749,7 +2134,8 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
                           label: widget.item.typeLabel,
                           color: const Color(0xFFFFB561),
                         ),
-                        if (widget.item.voteAverage != null && widget.item.voteAverage! > 0)
+                        if (widget.item.voteAverage != null &&
+                            widget.item.voteAverage! > 0)
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -1780,7 +2166,8 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
                           ),
                       ],
                     ),
-                    if (widget.item.overview != null && widget.item.overview!.isNotEmpty) ...[
+                    if (widget.item.overview != null &&
+                        widget.item.overview!.isNotEmpty) ...[
                       SizedBox(height: isSmallScreen ? 6 : 8),
                       Text(
                         widget.item.overview!,
@@ -1834,7 +2221,8 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
             child: Container(
               height: 40,
               decoration: BoxDecoration(
-                color: darkBase, // No opacity to avoid blending with dark background
+                color:
+                    darkBase, // No opacity to avoid blending with dark background
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
@@ -1871,11 +2259,7 @@ class _ModernHeroCardState extends State<_ModernHeroCard> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
-                    icon,
-                    color: const Color(0xFF3B2410),
-                    size: 24,
-                  ),
+                  Icon(icon, color: const Color(0xFF3B2410), size: 24),
                   const SizedBox(width: 8),
                   Text(
                     label.toUpperCase(),
@@ -1983,7 +2367,7 @@ class _ModernDots extends StatelessWidget {
 
 // ===================== Horizontal Section =====================
 
-class _ModernHorizontalSection extends StatelessWidget {
+class _ModernHorizontalSection extends StatefulWidget {
   final String title;
   final List<TmdbItem> items;
   final String imgBase;
@@ -2009,30 +2393,151 @@ class _ModernHorizontalSection extends StatelessWidget {
   });
 
   @override
+  State<_ModernHorizontalSection> createState() =>
+      _ModernHorizontalSectionState();
+}
+
+class _ModernHorizontalSectionState extends State<_ModernHorizontalSection> {
+  PageController? _pageController;
+  double _currentViewportFraction = 0.40;
+  static const int _loopFactor = 1000;
+
+  double _calculateViewportFraction(double width) {
+    if (width < 360) return 0.44;
+    if (width < 600) return 0.40;
+    if (width < 900) return 0.26;
+    if (width < 1200) return 0.18;
+    if (width < 1600) return 0.14;
+    return 0.11;
+  }
+
+  double _calculateCarouselHeight(double width, bool isDesktop) {
+    if (isDesktop) {
+      return width >= 1200 ? 285.0 : 265.0;
+    }
+    if (width < 360) return 215.0;
+    return 235.0;
+  }
+
+  int _getInitialPage(int count) {
+    if (count <= 1) return 0;
+    return count * (_loopFactor ~/ 2);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final width = MediaQuery.of(context).size.width;
+    final fraction = _calculateViewportFraction(width);
+    final count = widget.items.length > 20 ? 20 : widget.items.length;
+    final initialPage = _getInitialPage(count);
+
+    if (_pageController == null) {
+      _currentViewportFraction = fraction;
+      _pageController = PageController(
+        viewportFraction: fraction,
+        initialPage: initialPage,
+      );
+    } else if ((_currentViewportFraction - fraction).abs() > 0.005) {
+      _currentViewportFraction = fraction;
+      final oldPage =
+          _pageController!.hasClients && _pageController!.page != null
+              ? _pageController!.page!.round()
+              : initialPage;
+      _pageController!.dispose();
+      _pageController = PageController(
+        viewportFraction: fraction,
+        initialPage: oldPage,
+      );
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _ModernHorizontalSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.items.length != widget.items.length) {
+      final count = widget.items.length > 20 ? 20 : widget.items.length;
+      final initialPage = _getInitialPage(count);
+      if (_pageController != null && _pageController!.hasClients) {
+        _pageController!.jumpToPage(initialPage);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController?.dispose();
+    super.dispose();
+  }
+
+  void _navigateToDetails(TmdbItem item) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DetailsPage(
+          apiKey: widget.apiKey,
+          base: widget.base,
+          imgW185: widget.imgW185,
+          imgW500: widget.imgW500,
+          imgW780: widget.imgW780,
+          id: item.id,
+          mediaType: item.mediaType,
+          linkApiBase: EnvConfig.luminoBackendUrl,
+          primeboxUrl: item.primeboxUrl,
+          primeboxSubjectType: item.primeboxSubjectType,
+          primeboxType: item.primeboxType,
+          movieboxSubjectId: item.movieboxSubjectId,
+          initialTitle: item.displayTitle,
+          initialBackdrop: item.backdropPath ?? item.posterPath,
+        ),
+      ),
+    ).then((_) => widget.onReturn?.call());
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (widget.items.isEmpty) return const SizedBox.shrink();
+
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 380;
+    final displayItems =
+        widget.items.length > 20 ? widget.items.sublist(0, 20) : widget.items;
+    final count = displayItems.length;
+    final isLooping = count > 1;
+    final totalItemCount = isLooping ? count * _loopFactor : count;
+    final initialPage = _getInitialPage(count);
 
-    final double cardWidth = isDesktop
-        ? 160.0
-        : (isSmallScreen ? 115.0 : 130.0);
-    final double cardHeight = cardWidth * 1.5 + (isSmallScreen ? 50 : 60);
-    final displayItems = items.length > 20 ? items.sublist(0, 20) : items;
+    final double carouselHeight =
+        _calculateCarouselHeight(screenWidth, widget.isDesktop);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Section Header
         Padding(
           padding: EdgeInsets.fromLTRB(
             isSmallScreen ? 16 : 20,
-            24,
+            20,
             isSmallScreen ? 16 : 20,
-            16,
+            12,
           ),
           child: Row(
             children: [
+              Container(
+                width: 3.5,
+                height: isSmallScreen ? 15 : 17,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFFFE3B5), Color(0xFFFFB561)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 8),
               Text(
-                title,
+                widget.title,
                 style: GoogleFonts.outfit(
                   color: Colors.white,
                   fontSize: isSmallScreen ? 16 : 18,
@@ -2043,178 +2548,411 @@ class _ModernHorizontalSection extends StatelessWidget {
             ],
           ),
         ),
+
+        // Looping Carousel
         SizedBox(
-          height: cardHeight,
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            itemCount: displayItems.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 14),
-            itemBuilder: (context, i) => _ModernMediaCard(
-              item: displayItems[i],
-              width: cardWidth,
-              apiKey: apiKey,
-              base: base,
-              imgW185: imgW185,
-              imgW500: imgW500,
-              imgW780: imgW780,
-              onReturn: onReturn,
-            ),
-          ),
+          height: carouselHeight,
+          child: _pageController == null
+              ? const SizedBox.shrink()
+              : ScrollConfiguration(
+                  behavior: const _AppScrollBehavior(),
+                  child: PageView.builder(
+                    controller: _pageController,
+                    physics: const BouncingScrollPhysics(
+                      parent: AlwaysScrollableScrollPhysics(),
+                    ),
+                    itemCount: totalItemCount,
+                    itemBuilder: (context, i) {
+                      final itemIndex = i % count;
+                      final item = displayItems[itemIndex];
+
+                      return AnimatedBuilder(
+                        animation: _pageController!,
+                        builder: (context, child) {
+                          double page = initialPage.toDouble();
+                          if (_pageController!.hasClients &&
+                              _pageController!.position.haveDimensions) {
+                            page = _pageController!.page ?? page;
+                          }
+                          final double diff = i - page;
+                          final double absDiff = diff.abs().clamp(0.0, 2.0);
+
+                          // Prominent carousel pop for center card
+                          final bool isCenter = absDiff < 0.45;
+                          final double scale =
+                              (1.0 - (absDiff * 0.16)).clamp(0.82, 1.0);
+                          final double translateY =
+                              (absDiff.clamp(0.0, 1.0) * 10.0);
+                          final double opacity =
+                              (1.0 - (absDiff.clamp(0.0, 1.0) * 0.28))
+                                  .clamp(0.65, 1.0);
+                          final double parallaxOffset =
+                              (-diff * 20.0).clamp(-28.0, 28.0);
+
+                          return Transform.translate(
+                            offset: Offset(0, translateY),
+                            child: Transform.scale(
+                              scale: scale,
+                              child: Opacity(
+                                opacity: opacity,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4.5,
+                                    vertical: 4.0,
+                                  ),
+                                  child: _ParallaxCoverflowCard(
+                                    item: item,
+                                    parallaxOffset: parallaxOffset,
+                                    isCenter: isCenter,
+                                    imgW500: widget.imgW500,
+                                    onTap: () => _navigateToDetails(item),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
         ),
       ],
     );
   }
 }
 
-class _ModernMediaCard extends StatelessWidget {
-  final TmdbItem item;
-  final double width;
-  final String apiKey;
-  final String base;
-  final String imgW185;
-  final String imgW500;
-  final String imgW780;
-  final VoidCallback? onReturn;
+// ===================== Parallax Coverflow Card =====================
 
-  const _ModernMediaCard({
+class _ParallaxCoverflowCard extends StatefulWidget {
+  final TmdbItem item;
+  final double parallaxOffset;
+  final bool isCenter;
+  final String imgW500;
+  final VoidCallback onTap;
+
+  const _ParallaxCoverflowCard({
     required this.item,
-    required this.width,
-    required this.apiKey,
-    required this.base,
-    required this.imgW185,
+    required this.parallaxOffset,
+    this.isCenter = false,
     required this.imgW500,
-    required this.imgW780,
-    this.onReturn,
+    required this.onTap,
   });
 
   @override
+  State<_ParallaxCoverflowCard> createState() => _ParallaxCoverflowCardState();
+}
+
+class _ParallaxCoverflowCardState extends State<_ParallaxCoverflowCard> {
+  bool _isHovered = false;
+  bool _isPressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    final img = item.posterPath ?? item.backdropPath;
-    final imageUrl = img != null
-        ? (img.startsWith('http') ? img : '$imgW500$img')
+    final img = widget.item.posterPath ?? widget.item.backdropPath;
+    final imageUrl = (img != null && img.trim().isNotEmpty)
+        ? (img.startsWith('http') ? img : '${widget.imgW500}$img')
         : null;
 
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => DetailsPage(
-              apiKey: apiKey,
-              base: base,
-              imgW185: imgW185,
-              imgW500: imgW500,
-              imgW780: imgW780,
-              id: item.id,
-              mediaType: item.mediaType,
-              linkApiBase: EnvConfig.luminoBackendUrl,
-              primeboxUrl: item.primeboxUrl,
-              primeboxSubjectType: item.primeboxSubjectType,
-              primeboxType: item.primeboxType,
-              movieboxSubjectId: item.movieboxSubjectId,
-              initialTitle: item.displayTitle,
-              initialBackdrop: item.backdropPath ?? item.posterPath,
-            ),
-          ),
-        ).then((_) => onReturn?.call());
-      },
-      child: SizedBox(
-        width: width,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 12,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
+    final voteAverage = widget.item.voteAverage;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _isPressed = true),
+        onTapUp: (_) => setState(() => _isPressed = false),
+        onTapCancel: () => setState(() => _isPressed = false),
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _isPressed ? 0.95 : (_isHovered ? 1.04 : 1.0),
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: (widget.isCenter || _isHovered)
+                    ? const Color(0xFFFFB561)
+                        .withValues(alpha: _isHovered ? 0.90 : 0.65)
+                    : Colors.white.withValues(alpha: 0.10),
+                width: (widget.isCenter || _isHovered) ? 1.4 : 0.8,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black
+                      .withValues(alpha: widget.isCenter ? 0.65 : 0.40),
+                  blurRadius: widget.isCenter ? 18 : 10,
+                  offset: Offset(0, widget.isCenter ? 8 : 4),
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      imageUrl != null
-                          ? CachedNetworkImage(
-                              imageUrl: imageUrl,
-                              fit: BoxFit.cover,
-                              placeholder: (context, url) => Container(
-                                color: Colors.white.withValues(alpha: 0.05),
+                if (widget.isCenter || _isHovered)
+                  BoxShadow(
+                    color: const Color(0xFFFFB561)
+                        .withValues(alpha: _isHovered ? 0.35 : 0.22),
+                    blurRadius: 18,
+                    spreadRadius: 1,
+                    offset: const Offset(0, 4),
+                  ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(15),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Parallax Image Layer
+                  ClipRect(
+                    child: Transform.translate(
+                      offset: Offset(widget.parallaxOffset, 0),
+                      child: Transform.scale(
+                        scale: 1.18,
+                        child: imageUrl != null
+                            ? CachedNetworkImage(
+                                imageUrl: imageUrl,
+                                fit: BoxFit.cover,
+                                placeholder: (context, url) => Container(
+                                  color: const Color(0xFF14171F),
+                                  child: const Center(
+                                    child: SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Color(0xFFFFB561),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                errorWidget: (context, url, error) => Container(
+                                  color: const Color(0xFF14171F),
+                                  child: const Center(
+                                    child: Icon(
+                                      Icons.movie_outlined,
+                                      color: Colors.white24,
+                                      size: 30,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : Container(
+                                color: const Color(0xFF14171F),
+                                child: const Center(
+                                  child: Icon(
+                                    Icons.movie_outlined,
+                                    color: Colors.white24,
+                                    size: 30,
+                                  ),
+                                ),
                               ),
-                              errorWidget: (context, url, error) =>
-                                  Container(color: Colors.white10),
-                            )
-                          : Container(color: Colors.white10),
-                      Positioned(
-                        top: 8,
-                        left: 8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.6),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.white10),
-                          ),
-                          child: Text(
-                            item.mediaType == 'tv' ? 'TV' : 'MOVIE',
+                      ),
+                    ),
+                  ),
+
+                  // Bottom Gradient Scrim & Title Info
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(10, 22, 10, 9),
+                      decoration: BoxDecoration(
+                        borderRadius: const BorderRadius.vertical(
+                          bottom: Radius.circular(15),
+                        ),
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.40),
+                            Colors.black.withValues(alpha: 0.92),
+                          ],
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            widget.item.displayTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.outfit(
-                              fontSize: 8,
-                              fontWeight: FontWeight.w900,
-                              color: Colors.white70,
+                              color: Colors.white,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.2,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black.withValues(alpha: 0.8),
+                                  blurRadius: 5,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Text(
+                                widget.item.yearLabel.isNotEmpty
+                                    ? widget.item.yearLabel
+                                    : widget.item.typeLabel,
+                                style: GoogleFonts.outfit(
+                                  color: Colors.white.withValues(alpha: 0.65),
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (widget.item.genres != null &&
+                                  widget.item.genres!.isNotEmpty) ...[
+                                const SizedBox(width: 5),
+                                Container(
+                                  width: 2.5,
+                                  height: 2.5,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.35),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 5),
+                                Flexible(
+                                  child: Text(
+                                    widget.item.genres!.first,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.outfit(
+                                      color: const Color(0xFFFFB561)
+                                          .withValues(alpha: 0.85),
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Media Type Pill (Top-Left)
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5.5,
+                        vertical: 2.5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.15),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Text(
+                        widget.item.mediaType == 'tv' ? 'TV' : 'MOVIE',
+                        style: GoogleFonts.outfit(
+                          fontSize: 8,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white.withValues(alpha: 0.85),
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Rating Pill (Top-Right)
+                  if (voteAverage != null && voteAverage > 0)
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(5),
+                          border: Border.all(
+                            color: const Color(0xFFFFB561)
+                                .withValues(alpha: 0.35),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.star_rounded,
+                              color: Color(0xFFFFB561),
+                              size: 10,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              voteAverage.toStringAsFixed(1),
+                              style: GoogleFonts.outfit(
+                                fontSize: 8.5,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  // Center Play Icon Indicator on Hover
+                  Center(
+                    child: AnimatedOpacity(
+                      opacity: _isHovered ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 180),
+                      child: AnimatedScale(
+                        scale: _isHovered ? 1.0 : 0.7,
+                        duration: const Duration(milliseconds: 180),
+                        curve: Curves.easeOutCubic,
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFFFFE3B5), Color(0xFFFFB561)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFFFFB561)
+                                    .withValues(alpha: 0.5),
+                                blurRadius: 14,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              Icons.play_arrow_rounded,
+                              color: Color(0xFF14100C),
+                              size: 22,
                             ),
                           ),
                         ),
                       ),
-                      Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.1),
-                              Colors.black.withValues(alpha: 0.7),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
-            const SizedBox(height: 10),
-            Text(
-              item.displayTitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.outfit(
-                color: Colors.white.withValues(alpha: 0.8),
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              item.yearLabel.isNotEmpty ? item.yearLabel : item.typeLabel,
-              style: GoogleFonts.outfit(
-                color: Colors.white.withValues(alpha: 0.4),
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -2558,507 +3296,7 @@ class AppLoader extends StatelessWidget {
   }
 }
 
-// ===================== NEW: Check Update Screen =====================
-
-class CheckUpdatePage extends StatefulWidget {
-  const CheckUpdatePage({super.key});
-
-  @override
-  State<CheckUpdatePage> createState() => _CheckUpdatePageState();
-}
-
-class _CheckUpdatePageState extends State<CheckUpdatePage> {
-  bool _loading = false;
-  String _currentVersion = "...";
-
-  @override
-  void initState() {
-    super.initState();
-    _loadVersion();
-  }
-
-  Future<void> _loadVersion() async {
-    try {
-      final info = await PackageInfo.fromPlatform();
-      if (mounted) {
-        setState(() => _currentVersion = info.version);
-      }
-    } catch (e) {
-      debugPrint("Error loading version: $e");
-    }
-  }
-
-  Future<void> _handleCheckUpdate() async {
-    setState(() => _loading = true);
-    await UpdateService().checkForUpdatesNow(context);
-    if (mounted) setState(() => _loading = false);
-  }
-
-
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context).textTheme;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const HugeIcon(
-            icon: HugeIcons.strokeRoundedArrowLeft01,
-            color: Colors.white,
-            size: 24,
-          ),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          'Update Center',
-          style: GoogleFonts.comme(fontWeight: FontWeight.w800, fontSize: 18),
-        ),
-        actions: const [ProfileButton(), SizedBox(width: 8)],
-      ),
-      body: Stack(
-        children: [
-          // Background Gradient
-          Positioned.fill(
-            child: Container(
-              decoration: const BoxDecoration(color: Color(0xFF0F0F0E)),
-            ),
-          ),
-          // Radial Glow
-          Positioned(
-            top: -150,
-            left: -150,
-            child: Container(
-              width: 400,
-              height: 400,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: colorScheme.primary.withValues(alpha: 0.08),
-                    blurRadius: 120,
-                    spreadRadius: 40,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -150,
-            right: -150,
-            child: Container(
-              width: 400,
-              height: 400,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: colorScheme.primary.withValues(alpha: 0.05),
-                    blurRadius: 120,
-                    spreadRadius: 40,
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 500),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Modern Icon Illustration
-                    Container(
-                      padding: const EdgeInsets.all(32),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.03),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.05),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: colorScheme.primary.withValues(alpha: 0.05),
-                            blurRadius: 40,
-                            spreadRadius: 10,
-                          ),
-                        ],
-                      ),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          HugeIcon(
-                            icon: HugeIcons.strokeRoundedDownload01,
-                            size: 84,
-                            color: Colors.orangeAccent,
-                          ),
-                          if (_loading)
-                            SizedBox(
-                              width: 120,
-                              height: 120,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 1.5,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  colorScheme.primary.withValues(alpha: 0.3),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 48),
-                    // Title with Syne font
-                    Text(
-                      'System Update',
-                      style: GoogleFonts.comme(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                        letterSpacing: -1,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Keep your Lumino experience smooth and secure. Check for the latest improvements and features.',
-                      textAlign: TextAlign.center,
-                      style: theme.bodyLarge?.copyWith(
-                        color: Colors.white54,
-                        height: 1.6,
-                        fontSize: 15,
-                      ),
-                    ),
-                    const SizedBox(height: 40),
-                    // Glassmorphic Version Badge
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(24),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.05),
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.1),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: Colors.orangeAccent,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.orangeAccent,
-                                      blurRadius: 10,
-                                      spreadRadius: 2,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                'Current v$_currentVersion',
-                                style: theme.bodySmall?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 1,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 64),
-                    // Premium Action Button
-                    SizedBox(
-                      width: double.infinity,
-                      height: 64,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: _loading
-                              ? []
-                              : [
-                                  BoxShadow(
-                                    color: Colors.orangeAccent.withValues(alpha: 0.2),
-                                    blurRadius: 20,
-                                    offset: const Offset(0, 10),
-                                  ),
-                                ],
-                        ),
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: Colors.orangeAccent,
-                            foregroundColor: Colors.black,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                          ),
-                          onPressed: _loading ? null : _handleCheckUpdate,
-                          child: _loading
-                              ? const SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 3,
-                                    color: Colors.black,
-                                  ),
-                                )
-                              : Text(
-                                  'Check for Updates',
-                                  style: GoogleFonts.syne(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.2,
-                                  ),
-                                ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 32),
-                    // Secondary Link
-                    Opacity(
-                      opacity: 0.5,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          HugeIcon(
-                            icon: HugeIcons.strokeRoundedGlobal,
-                            size: 16,
-                            color: Colors.white,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'lumino-app.web.app',
-                            style: theme.bodySmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ModernUpdateDialog extends StatelessWidget {
-  final String latestVersion;
-
-  const _ModernUpdateDialog({required this.latestVersion});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context).textTheme;
-
-    return Center(
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 380),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(32),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.6),
-              blurRadius: 40,
-              offset: const Offset(0, 20),
-            ),
-            BoxShadow(
-              color: Colors.orangeAccent.withValues(alpha: 0.05),
-              blurRadius: 60,
-              spreadRadius: -10,
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(32),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    const Color(0xFF1E1E1E).withValues(alpha: 0.9),
-                    const Color(0xFF121212).withValues(alpha: 0.95),
-                  ],
-                ),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Top Accent Bar
-                    Container(
-                      height: 4,
-                      width: 60,
-                      margin: const EdgeInsets.only(top: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.orangeAccent.withValues(alpha: 0.3),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(32, 28, 32, 32),
-                      child: Column(
-                        children: [
-                          // Modern Illustration
-                          Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Container(
-                                width: 80,
-                                height: 80,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: Colors.orangeAccent.withValues(alpha: 0.1),
-                                ),
-                              ),
-                              const HugeIcon(
-                                icon: HugeIcons.strokeRoundedDownload01,
-                                size: 40,
-                                color: Colors.orangeAccent,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 24),
-
-                          // Version Badge
-                          Text(
-                            'Update Available',
-                            style: GoogleFonts.comme(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.orangeAccent.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.orangeAccent.withValues(alpha: 0.2),
-                              ),
-                            ),
-                            child: Text(
-                              'v$latestVersion',
-                              style: GoogleFonts.outfit(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.orangeAccent,
-                                letterSpacing: 1.2,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'A new version is available',
-                            textAlign: TextAlign.center,
-                            style: theme.bodyMedium?.copyWith(
-                              color: Colors.white.withValues(alpha: 0.5),
-                              height: 1.6,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 32),
-
-                          // Primary Action
-                          SizedBox(
-                            width: double.infinity,
-                            height: 56,
-                            child: FilledButton(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: Colors.orangeAccent,
-                                foregroundColor: Colors.black,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                elevation: 0,
-                              ),
-                              onPressed: () async {
-                                Navigator.pop(context);
-                                final websiteUrl = Uri.parse(
-                                  'https://sanjeevsnair.github.io/Lumino_window_Autoupdater/',
-                                );
-                                if (await canLaunchUrl(websiteUrl)) {
-                                  await launchUrl(
-                                    websiteUrl,
-                                    mode: LaunchMode.externalApplication,
-                                  );
-                                }
-                              },
-                              child: Text(
-                                'Update Now',
-                                style: GoogleFonts.comme(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-
-                          // Secondary Action
-                          SizedBox(
-                            width: double.infinity,
-                            child: TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: Text(
-                                'Remind me later',
-                                style: theme.labelLarge?.copyWith(
-                                  color: Colors.white.withValues(alpha: 0.3),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
+// CheckUpdatePage and ModernUpdateDialog moved to check_update_page.dart
 
 // ===================== Continue Watching Section =====================
 
@@ -3086,29 +3324,49 @@ class _ModernContinueWatching extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final double cardWidth = isDesktop ? 280.0 : 190.0;
-    final double cardHeight = cardWidth * 0.56 + 20;
+    final double cardHeight = cardWidth * 0.56 + 28;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-          child: Text(
-            'Continue Watching',
-            style: GoogleFonts.outfit(
-              color: Colors.white.withValues(alpha: 0.8),
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 0,
-            ),
+          child: Row(
+            children: [
+              Container(
+                width: 3.5,
+                height: 18,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFFFE3B5), Color(0xFFFFB561)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Continue Watching',
+                style: GoogleFonts.outfit(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ],
           ),
         ),
         SizedBox(
           height: cardHeight,
           child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            clipBehavior: Clip.none,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
             scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
+            physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            ),
             itemCount: items.length,
             separatorBuilder: (_, _) => const SizedBox(width: 16),
             itemBuilder: (context, index) => _ModernContinueCard(
@@ -3121,6 +3379,7 @@ class _ModernContinueWatching extends StatelessWidget {
               imgW780: imgW780,
               isDesktop: isDesktop,
               onRefresh: onRefresh,
+              index: index,
             ),
           ),
         ),
@@ -3129,7 +3388,7 @@ class _ModernContinueWatching extends StatelessWidget {
   }
 }
 
-class _ModernContinueCard extends StatelessWidget {
+class _ModernContinueCard extends StatefulWidget {
   final WatchHistoryItem item;
   final double width;
   final String apiKey;
@@ -3139,6 +3398,7 @@ class _ModernContinueCard extends StatelessWidget {
   final String imgW780;
   final bool isDesktop;
   final VoidCallback onRefresh;
+  final int index;
 
   const _ModernContinueCard({
     required this.item,
@@ -3150,226 +3410,313 @@ class _ModernContinueCard extends StatelessWidget {
     required this.imgW780,
     required this.isDesktop,
     required this.onRefresh,
+    this.index = 0,
   });
 
   @override
+  State<_ModernContinueCard> createState() => _ModernContinueCardState();
+}
+
+class _ModernContinueCardState extends State<_ModernContinueCard> {
+  bool _isPressed = false;
+  bool _isHovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    final poster = item.posterPath;
-    final imageUrl = poster != null
-        ? (poster.startsWith('http') ? poster : '$imgW780$poster')
+    final poster = widget.item.posterPath;
+    final imageUrl = (poster != null && poster.trim().isNotEmpty)
+        ? (poster.startsWith('http') ? poster : '${widget.imgW780}$poster')
         : null;
-    final progress = (item.position / (item.duration > 0 ? item.duration : 1))
+    final progress = (widget.item.position /
+            (widget.item.duration > 0 ? widget.item.duration : 1))
         .clamp(0.0, 1.0);
 
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => DetailsPage(
-              apiKey: apiKey,
-              base: base,
-              imgW185: imgW185,
-              imgW500: imgW500,
-              imgW780: imgW780,
-              id: item.id ?? 0,
-              mediaType: item.mediaType,
-              linkApiBase: EnvConfig.luminoBackendUrl,
-              primeboxUrl: item.primeboxUrl,
-              primeboxSubjectType: item.primeboxSubjectType,
-              primeboxType: item.primeboxType,
-              movieboxSubjectId: item.movieboxSubjectId,
-              initialTitle: item.title,
-              initialBackdrop: item.posterPath,
-            ),
+    final bool isHighlighted = _isPressed || _isHovered;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0.0, end: 1.0),
+      duration: Duration(milliseconds: 380 + (widget.index * 40).clamp(0, 320)),
+      curve: Curves.easeOutCubic,
+      builder: (context, animValue, child) {
+        return Opacity(
+          opacity: animValue.clamp(0.0, 1.0),
+          child: Transform.translate(
+            offset: Offset(26.0 * (1.0 - animValue), 0.0),
+            child: child,
           ),
-        ).then((_) => onRefresh());
+        );
       },
-      onLongPress: () async {
-        final confirm = await _showRemoveDialog(context);
-        if (confirm == true) {
-          await WatchHistoryService.removeFromHistory(
-            item.mediaType,
-            item.id != null && item.id != 0
-                ? item.id
-                : (item.primeboxUrl ?? item.title),
-            isOffline: item.isOffline,
-          );
-          onRefresh();
-        }
-      },
-      child: Container(
-        width: width,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.4),
-              blurRadius: 15,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // Background Image
-              imageUrl != null
-                  ? CachedNetworkImage(
-                      imageUrl: imageUrl,
-                      fit: BoxFit.cover,
-                      placeholder: (context, url) =>
-                          Container(color: Colors.white.withValues(alpha: 0.05)),
-                      errorWidget: (context, url, error) =>
-                          Container(color: Colors.white10),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTapDown: (_) => setState(() => _isPressed = true),
+          onTapUp: (_) => setState(() => _isPressed = false),
+          onTapCancel: () => setState(() => _isPressed = false),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => DetailsPage(
+                  apiKey: widget.apiKey,
+                  base: widget.base,
+                  imgW185: widget.imgW185,
+                  imgW500: widget.imgW500,
+                  imgW780: widget.imgW780,
+                  id: widget.item.id ?? 0,
+                  mediaType: widget.item.mediaType,
+                  linkApiBase: EnvConfig.luminoBackendUrl,
+                  primeboxUrl: widget.item.primeboxUrl,
+                  primeboxSubjectType: widget.item.primeboxSubjectType,
+                  primeboxType: widget.item.primeboxType,
+                  movieboxSubjectId: widget.item.movieboxSubjectId,
+                  initialTitle: widget.item.title,
+                  initialBackdrop: widget.item.posterPath,
+                ),
+              ),
+            ).then((_) => widget.onRefresh());
+          },
+          onLongPress: () async {
+            final confirm = await _showRemoveDialog(context);
+            if (confirm == true) {
+              await WatchHistoryService.removeFromHistory(
+                widget.item.mediaType,
+                widget.item.id != null && widget.item.id != 0
+                    ? widget.item.id
+                    : (widget.item.primeboxUrl ?? widget.item.title),
+                isOffline: widget.item.isOffline,
+              );
+              widget.onRefresh();
+            }
+          },
+          child: AnimatedScale(
+            scale: _isPressed ? 0.94 : (_isHovered ? 1.03 : 1.0),
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              width: widget.width,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isHighlighted
+                      ? const Color(0xFFFFB561).withValues(alpha: 0.75)
+                      : Colors.white.withValues(alpha: 0.08),
+                  width: isHighlighted ? 1.6 : 1.0,
+                ),
+                boxShadow: [
+                  if (_isPressed)
+                    BoxShadow(
+                      color: const Color(0xFFFFB561).withValues(alpha: 0.3),
+                      blurRadius: 10,
+                      spreadRadius: 1,
+                      offset: const Offset(0, 3),
                     )
-                  : Container(color: Colors.white10),
-
-              // Glass Gradient Overlay
-              Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      Colors.black.withValues(alpha: 0.1),
-                      Colors.black.withValues(alpha: 0.2),
-                    ],
-                    stops: const [0.0, 0.4, 1.0],
-                  ),
-                ),
-              ),
-
-              // Play Icon (Subtle)
-              Center(
-                child: Container(
-                  padding: EdgeInsets.all(isDesktop ? 10 : 8),
-                  margin: EdgeInsets.only(bottom: isDesktop ? 0 : 15),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white.withValues(alpha: 0.15),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-                  ),
-                  child: Icon(
-                    Icons.play_arrow_rounded,
-                    color: Colors.white,
-                    size: isDesktop ? 32 : 24,
-                  ),
-                ),
-              ),
-
-              // Info Area (Bottom)
-              Positioned(
-                bottom: -6,
-                left: 0,
-                right: 0,
-                child: ClipRect(
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.3),
-                          Colors.black.withValues(alpha: 0.6),
-                        ],
-                        stops: const [0.0, 0.4, 1.0],
-                      ),
+                  else if (_isHovered)
+                    BoxShadow(
+                      color: const Color(0xFFFFB561).withValues(alpha: 0.35),
+                      blurRadius: 22,
+                      spreadRadius: 1,
+                      offset: const Offset(0, 8),
+                    )
+                  else
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      blurRadius: 15,
+                      offset: const Offset(0, 8),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.outfit(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.2,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          item.mediaType == 'tv'
-                              ? 'Season ${item.season} · Episode ${item.episode}'
-                              : 'Continue Movie',
-                          style: GoogleFonts.outfit(
-                            color: Colors.white.withValues(alpha: 0.5),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                ],
               ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(19),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    // Background Image
+                    imageUrl != null
+                        ? CachedNetworkImage(
+                            imageUrl: imageUrl,
+                            fit: BoxFit.cover,
+                            placeholder: (context, url) => Container(
+                              color: Colors.white.withValues(alpha: 0.05),
+                            ),
+                            errorWidget: (context, url, error) =>
+                                Container(color: Colors.white10),
+                          )
+                        : Container(color: Colors.white10),
 
-              // Progress Bar (Integrated at the bottom)
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  height: 3,
-                  color: Colors.white.withValues(alpha: 0.1),
-                  child: FractionallySizedBox(
-                    alignment: Alignment.centerLeft,
-                    widthFactor: progress,
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Color(0xFFFFB561), Color(0xFFFF8C1A)],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              // Desktop Remove Button
-              if (isDesktop)
-                Positioned(
-                  top: 10,
-                  right: 10,
-                  child: GestureDetector(
-                    onTap: () async {
-                      final confirm = await _showRemoveDialog(context);
-                      if (confirm == true) {
-                        await WatchHistoryService.removeFromHistory(
-                          item.mediaType,
-                          item.id != null && item.id != 0
-                              ? item.id
-                              : (item.primeboxUrl ?? item.title),
-                          isOffline: item.isOffline,
-                        );
-                        onRefresh();
-                      }
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(5),
+                    // Glass Gradient Overlay
+                    Container(
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white10),
-                      ),
-                      child: const Icon(
-                        Icons.close_rounded,
-                        color: Colors.white70,
-                        size: 14,
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.1),
+                            Colors.black.withValues(alpha: 0.25),
+                          ],
+                          stops: const [0.0, 0.4, 1.0],
+                        ),
                       ),
                     ),
-                  ),
+
+                    // Play Icon with dynamic glow on highlight
+                    Center(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        curve: Curves.easeOutCubic,
+                        padding: EdgeInsets.all(widget.isDesktop ? 10 : 8),
+                        margin:
+                            EdgeInsets.only(bottom: widget.isDesktop ? 0 : 15),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isHighlighted
+                              ? const Color(0xFFFFB561)
+                              : Colors.white.withValues(alpha: 0.18),
+                          border: Border.all(
+                            color: isHighlighted
+                                ? const Color(0xFFFFD59E)
+                                : Colors.white.withValues(alpha: 0.25),
+                            width: 1.2,
+                          ),
+                          boxShadow: [
+                            if (isHighlighted)
+                              BoxShadow(
+                                color: const Color(0xFFFFB561)
+                                    .withValues(alpha: 0.5),
+                                blurRadius: 14,
+                                spreadRadius: 2,
+                              ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.play_arrow_rounded,
+                          color: isHighlighted
+                              ? const Color(0xFF14100C)
+                              : Colors.white,
+                          size: widget.isDesktop ? 32 : 24,
+                        ),
+                      ),
+                    ),
+
+                    // Info Area (Bottom)
+                    Positioned(
+                      bottom: -6,
+                      left: 0,
+                      right: 0,
+                      child: ClipRect(
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.35),
+                                Colors.black.withValues(alpha: 0.75),
+                              ],
+                              stops: const [0.0, 0.4, 1.0],
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                widget.item.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.outfit(
+                                  color: isHighlighted
+                                      ? const Color(0xFFFFB561)
+                                      : Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                widget.item.mediaType == 'tv'
+                                    ? 'Season ${widget.item.season} · Episode ${widget.item.episode}'
+                                    : 'Continue Movie',
+                                style: GoogleFonts.outfit(
+                                  color: Colors.white.withValues(alpha: 0.5),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Progress Bar (Integrated at the bottom)
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: Container(
+                        height: 3.5,
+                        color: Colors.white.withValues(alpha: 0.1),
+                        child: FractionallySizedBox(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: progress,
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [Color(0xFFFFB561), Color(0xFFFF8C1A)],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Desktop Remove Button
+                    if (widget.isDesktop)
+                      Positioned(
+                        top: 10,
+                        right: 10,
+                        child: GestureDetector(
+                          onTap: () async {
+                            final confirm = await _showRemoveDialog(context);
+                            if (confirm == true) {
+                              await WatchHistoryService.removeFromHistory(
+                                widget.item.mediaType,
+                                widget.item.id != null && widget.item.id != 0
+                                    ? widget.item.id
+                                    : (widget.item.primeboxUrl ??
+                                        widget.item.title),
+                                isOffline: widget.item.isOffline,
+                              );
+                              widget.onRefresh();
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.5),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white10),
+                            ),
+                            child: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.white70,
+                              size: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-            ],
+              ),
+            ),
           ),
         ),
       ),
@@ -3421,7 +3768,9 @@ class _ModernContinueCard extends StatelessWidget {
                         color: const Color(0xFFFF4949).withValues(alpha: 0.12),
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: const Color(0xFFFF4949).withValues(alpha: 0.25),
+                          color: const Color(
+                            0xFFFF4949,
+                          ).withValues(alpha: 0.25),
                           width: 1.5,
                         ),
                       ),
@@ -3447,7 +3796,7 @@ class _ModernContinueCard extends StatelessWidget {
 
                     // Body text describing item to be removed
                     Text(
-                      'Remove "${item.title}" from your watch history?',
+                      'Remove "${widget.item.title}" from your watch history?',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.65),
@@ -3540,144 +3889,3 @@ class _ModernContinueCard extends StatelessWidget {
   }
 }
 
-class _ModernLiveTvPromo extends StatelessWidget {
-  final VoidCallback onTap;
-  final bool isDesktop;
-
-  const _ModernLiveTvPromo({required this.onTap, required this.isDesktop});
-
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 380;
-
-    // Dynamic scaling based on screen width
-    final double horizontalPadding = isDesktop ? 40 : 20;
-    final double cardHeight = isDesktop ? 160 : (isSmallScreen ? 110 : 130);
-    final double iconSize = isDesktop ? 64 : (isSmallScreen ? 40 : 48);
-    final double fontSizeTitle = isDesktop ? 22 : (isSmallScreen ? 14 : 16);
-    final double fontSizeSub = isDesktop ? 14 : (isSmallScreen ? 11 : 12);
-
-    return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: horizontalPadding,
-        vertical: 24,
-      ),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          height: cardHeight,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            gradient: const LinearGradient(
-              colors: [Color(0xFF1E1E26), Color(0xFF0F0F13)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFFFFB561).withValues(alpha: 0.05),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: Stack(
-              children: [
-                Positioned(
-                  right: -20,
-                  top: -20,
-                  child: Container(
-                    width: 100,
-                    height: 100,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0xFFFFB561).withValues(alpha: 0.1),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: EdgeInsets.all(isSmallScreen ? 16 : 20),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: iconSize,
-                        height: iconSize,
-
-                        child: HugeIcon(
-                          icon: HugeIcons.strokeRoundedTv01,
-                          color: const Color(0xFFFFB561),
-                          size: iconSize * 0.5,
-                        ),
-                      ),
-                      SizedBox(width: isSmallScreen ? 12 : 20),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              'Live TV Channels',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.outfit(
-                                color: Colors.white,
-                                fontSize: fontSizeTitle,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Watch favorite channels in real-time.',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.outfit(
-                                color: Colors.white.withValues(alpha: 0.5),
-                                fontSize: fontSizeSub,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(width: isSmallScreen ? 8 : 16),
-                      Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: isSmallScreen ? 10 : 16,
-                          vertical: isSmallScreen ? 8 : 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFB561),
-                          borderRadius: BorderRadius.circular(10),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFFFFB561).withValues(alpha: 0.3),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Text(
-                          'WATCH',
-                          style: GoogleFonts.outfit(
-                            color: Colors.black,
-                            fontSize: isSmallScreen ? 10 : 12,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}

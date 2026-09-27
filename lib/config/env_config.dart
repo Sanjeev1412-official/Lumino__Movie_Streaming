@@ -22,7 +22,10 @@ class EnvConfig {
   static String get lambdaUrl {
     final val = dotenv.env['LAMBDA_BASE_URL'];
     if (val != null && val.isNotEmpty) return val;
-    return const String.fromEnvironment('LAMBDA_BASE_URL', defaultValue: '');
+    return const String.fromEnvironment(
+      'LAMBDA_BASE_URL',
+      defaultValue: 'https://hqkkwzafev6lvngmejpksui3mi0bbnoj.lambda-url.ap-south-1.on.aws',
+    );
   }
 
   /// TMDB API Key

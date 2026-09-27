@@ -94,7 +94,7 @@ class PrimeboxService {
       final res = await http.get(
         Uri.parse('$_baseUrl/search?keyword=$q'),
         headers: _headers,
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 30));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (data['code'] == 0) {
@@ -161,7 +161,7 @@ class PrimeboxService {
     try {
       final res = await http
           .get(Uri.parse(detailApi), headers: _headers)
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 25));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (data['code'] == 0) {
@@ -203,7 +203,7 @@ class PrimeboxService {
         try {
           final res = await http
               .get(Uri.parse(legacyApi), headers: _headers)
-              .timeout(const Duration(seconds: 15));
+              .timeout(const Duration(seconds: 25));
           if (res.statusCode == 200) {
             final data = json.decode(res.body);
             if (data['code'] == 0) {
@@ -325,7 +325,7 @@ class PrimeboxService {
             ..._netfilmHeaders,
             'referer': fmoviesReferer,
           },
-        ).timeout(const Duration(seconds: 15));
+        ).timeout(const Duration(seconds: 25));
 
         if (res.statusCode == 200) {
           final jsonRes = json.decode(res.body);
@@ -405,7 +405,7 @@ class PrimeboxService {
               ..._netfilmHeaders,
               'referer': netfilmReferer,
             },
-          ).timeout(const Duration(seconds: 15));
+          ).timeout(const Duration(seconds: 25));
 
           if (res.statusCode == 200) {
             final jsonRes = json.decode(res.body);

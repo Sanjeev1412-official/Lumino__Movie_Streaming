@@ -6,8 +6,11 @@ import 'package:hugeicons/hugeicons.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:lumino_app_moviestreaming/auth_service.dart';
+import 'package:lumino_app_moviestreaming/login_page.dart';
 import 'package:lumino_app_moviestreaming/my_downloads_page.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:lumino_app_moviestreaming/app_settings_page.dart';
+import 'package:lumino_app_moviestreaming/check_update_page.dart';
 import 'package:lumino_app_moviestreaming/qr_scanner_page.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -21,7 +24,7 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   bool _isUpdating = false;
-  String _appVersion = 'v1.3.3';
+  String _appVersion = 'v1.3.4';
 
   @override
   void initState() {
@@ -122,6 +125,62 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _showSignInRequiredDialog(
+    BuildContext context,
+    String feature,
+    String message,
+  ) async {
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF171B26),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFB561).withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.lock_outline_rounded, color: Color(0xFFFFB561), size: 20),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              'Sign In Required',
+              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white70, fontSize: 13.5, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFFFB561),
+              foregroundColor: Colors.black,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const LoginPage()),
+              );
+            },
+            child: const Text('Sign In', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openQrScanner(BuildContext context) async {
     final String? linkedDeviceOS = await Navigator.push<String>(
       context,
@@ -154,9 +213,6 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       );
 
-      // Await 2 seconds to let the child device complete its setSession operation,
-      // and then proactively refresh the parent session. This rotates the parent to a completely
-      // independent session branch, keeping both devices fully authenticated with zero conflict!
       Future.delayed(const Duration(seconds: 2), () async {
         try {
           debugPrint('ProfilePage: Proactively rotating parent session post-link...');
@@ -215,71 +271,94 @@ class _ProfilePageState extends State<ProfilePage> {
                                 label: 'My Downloads',
                                 subtitle: 'View your offline content',
                                 onTap: () => Navigator.push(
-                                context,
-                                PageRouteBuilder(
-                                  pageBuilder: (context, animation, secondaryAnimation) => const MyDownloadsPage(),
-                                  transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                                    const begin = Offset(0.0, 0.05);
-                                    const end = Offset.zero;
-                                    const curve = Curves.easeOutQuart;
-                                    var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
-                                    var offsetAnimation = animation.drive(tween);
-                                    var fadeAnimation = animation.drive(CurveTween(curve: Curves.easeIn));
+                                  context,
+                                  PageRouteBuilder(
+                                    pageBuilder: (context, animation, secondaryAnimation) => const MyDownloadsPage(),
+                                    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                                      const begin = Offset(0.0, 0.05);
+                                      const end = Offset.zero;
+                                      const curve = Curves.easeOutQuart;
+                                      var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                                      var offsetAnimation = animation.drive(tween);
+                                      var fadeAnimation = animation.drive(CurveTween(curve: Curves.easeIn));
 
-                                    return FadeTransition(
-                                      opacity: fadeAnimation,
-                                      child: SlideTransition(
-                                        position: offsetAnimation,
-                                        child: child,
-                                      ),
-                                    );
-                                  },
-                                  transitionDuration: const Duration(milliseconds: 500),
+                                      return FadeTransition(
+                                        opacity: fadeAnimation,
+                                        child: SlideTransition(
+                                          position: offsetAnimation,
+                                          child: child,
+                                        ),
+                                      );
+                                    },
+                                    transitionDuration: const Duration(milliseconds: 500),
+                                  ),
                                 ),
-                              ),
                               ),
                             ]),
                             const SizedBox(height: 24),
                             _buildSectionTitle('PREFERENCES'),
                             _buildMenuCard([
-                              if (widget.onTapUpdate != null)
-                                _buildMenuItem(
-                                  context,
-                                  icon: HugeIcons.strokeRoundedRefresh,
-                                  label: 'Check for Updates',
-                                  subtitle: 'Look for new app versions',
-                                  onTap: widget.onTapUpdate!,
-                                ),
+                              _buildMenuItem(
+                                context,
+                                icon: HugeIcons.strokeRoundedRefresh,
+                                label: 'Check for Updates',
+                                subtitle: 'Look for new app versions',
+                                onTap: () {
+                                  if (widget.onTapUpdate != null) {
+                                    widget.onTapUpdate!();
+                                  } else {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(builder: (_) => const CheckUpdatePage()),
+                                    );
+                                  }
+                                },
+                              ),
                               _buildMenuItem(
                                 context,
                                 icon: Icons.qr_code_scanner_rounded,
                                 label: 'Link a Device',
-                                subtitle: 'Scan QR code to authorize another device',
-                                onTap: () => _openQrScanner(context),
+                                subtitle: auth.isLoggedIn
+                                    ? 'Scan QR code to authorize another device'
+                                    : 'Sign in to link another device',
+                                onTap: auth.isLoggedIn
+                                    ? () => _openQrScanner(context)
+                                    : () => _showSignInRequiredDialog(
+                                          context,
+                                          'Link a Device',
+                                          'Linking this app with another device (such as Android TV or Desktop) requires signing in with your Lumino account.',
+                                        ),
                               ),
                               _buildMenuItem(
                                 context,
                                 icon: HugeIcons.strokeRoundedSettings03,
                                 label: 'App Settings',
-                                subtitle: 'Theme, language, and more',
-                                onTap: () {},
-                              ),
-                            ]),
-                            const SizedBox(height: 24),
-                            _buildSectionTitle('DANGER ZONE'),
-                            _buildMenuCard([
-                              _buildMenuItem(
-                                context,
-                                icon: HugeIcons.strokeRoundedLogout01,
-                                label: 'Sign Out',
-                                subtitle: 'Log out of your account',
-                                color: Colors.redAccent,
+                                subtitle: 'Subtitles, playback, and engine settings',
                                 onTap: () {
-                                  auth.logout();
-                                  Navigator.pop(context);
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => const AppSettingsPage()),
+                                  );
                                 },
                               ),
                             ]),
+                            if (auth.isLoggedIn) ...[
+                              const SizedBox(height: 24),
+                              _buildSectionTitle('DANGER ZONE'),
+                              _buildMenuCard([
+                                _buildMenuItem(
+                                  context,
+                                  icon: HugeIcons.strokeRoundedLogout01,
+                                  label: 'Sign Out',
+                                  subtitle: 'Log out of your account',
+                                  color: Colors.redAccent,
+                                  onTap: () {
+                                    auth.logout();
+                                    Navigator.pop(context);
+                                  },
+                                ),
+                              ]),
+                            ],
                             const SizedBox(height: 40),
                             Center(
                               child: Text(
@@ -320,7 +399,7 @@ class _ProfilePageState extends State<ProfilePage> {
         onPressed: () => Navigator.pop(context),
       ),
       title: const Text(
-        'Profile Settings',
+        'Profile & Settings',
         style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18),
       ),
       centerTitle: true,
@@ -328,6 +407,10 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildProfileHeader(AuthService auth, bool isDesktop) {
+    if (!auth.isLoggedIn) {
+      return _buildGuestHeader(context, isDesktop);
+    }
+
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -414,7 +497,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       child: GestureDetector(
                         onTap: () => _showEditNameDialog(auth.name),
                         child: Text(
-                          auth.name,
+                          auth.name.isEmpty ? 'Lumino User' : auth.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 24, letterSpacing: -0.5),
@@ -433,8 +516,166 @@ class _ProfilePageState extends State<ProfilePage> {
                   auth.email,
                   style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: isDesktop ? 14 : 12, fontWeight: FontWeight.w500),
                 ),
-                
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGuestHeader(BuildContext context, bool isDesktop) {
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: 0.05),
+            Colors.white.withValues(alpha: 0.015),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Hero(
+                tag: 'profile-avatar',
+                child: Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [
+                        const Color(0xFFFFB561).withValues(alpha: 0.22),
+                        Colors.white.withValues(alpha: 0.05),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    border: Border.all(color: const Color(0xFFFFB561).withValues(alpha: 0.4)),
+                  ),
+                  child: const Center(
+                    child: HugeIcon(
+                      icon: HugeIcons.strokeRoundedUserCircle,
+                      color: Color(0xFFFFB561),
+                      size: 32.0,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Text(
+                          'Guest User',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 21,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                          ),
+                          child: const Text(
+                            'Not Signed In',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      'Sign in to sync your watchlist, history & devices',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        fontSize: isDesktop ? 13 : 12,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                ),
+                child: Ink(
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFFFB561), Color(0xFFFF9E2C)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFFB561).withValues(alpha: 0.25),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      HugeIcon(
+                        icon: HugeIcons.strokeRoundedLogin01,
+                        color: Color(0xFF0F0F14),
+                        size: 19.0,
+                      ),
+                      SizedBox(width: 10),
+                      Text(
+                        'Sign In or Create Account',
+                        style: TextStyle(
+                          color: Color(0xFF0F0F14),
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         ],

@@ -7,7 +7,7 @@
 
   [![Flutter Version](https://img.shields.io/badge/Flutter-%3E%3D3.10.1-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
   [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android-FFB561?style=for-the-badge&logo=windows&logoColor=black)](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming)
-  [![Version](https://img.shields.io/badge/Version-v1.3.3-brightgreen?style=for-the-badge)](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases/latest)
+  [![Version](https://img.shields.io/badge/Version-v1.3.4-brightgreen?style=for-the-badge)](https://github.com/Sanjeev1412-official/Lumino__Movie_Streaming/releases/latest)
   [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
   <p align="center">

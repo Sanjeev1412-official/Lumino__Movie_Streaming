@@ -7,7 +7,6 @@ import 'package:lumino_app_moviestreaming/homescreen.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:lumino_app_moviestreaming/notification_service.dart';
 
-
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -29,7 +28,7 @@ class _SplashScreenState extends State<SplashScreen>
 
     // Initialize services here once
     _initServices();
-    
+
     // Start prefetching Hero logos in the background while splash is showing
     MovieHomePage.prefetchHeroLogos();
   }
@@ -89,7 +88,11 @@ class _SplashScreenState extends State<SplashScreen>
                   errorBuilder: (context, error, stackTrace) {
                     debugPrint('Splash Lottie Error: $error');
                     return const Center(
-                      child: Icon(Icons.play_circle_fill, color: Colors.cyan, size: 100),
+                      child: Icon(
+                        Icons.play_circle_fill,
+                        color: Colors.cyan,
+                        size: 100,
+                      ),
                     );
                   },
                   onLoaded: (composition) {
@@ -108,7 +111,6 @@ class _SplashScreenState extends State<SplashScreen>
               ),
             ),
           ),
-          
         ],
       ),
     );

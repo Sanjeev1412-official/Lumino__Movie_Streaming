@@ -261,6 +261,7 @@ class _TrailerState extends State<Trailer> {
             httpSources: null,
             torrentStreams: null,
             initialQuality: item.quality ?? 'HD',
+            isTrailer: true,
           ),
         ),
       );
@@ -301,6 +302,7 @@ class _TrailerState extends State<Trailer> {
           httpSources: null,
           torrentStreams: null,
           initialQuality: resolved.qualityLabel,
+          isTrailer: true,
         ),
       ),
     );

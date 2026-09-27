@@ -291,10 +291,20 @@ class EpisodeOverlay extends StatelessWidget {
                                       child: SizedBox(
                                         width: 140,
                                         height: 80,
-                                        child: e.stillPath != null
+                                        child: (e.stillPath != null && e.stillPath!.trim().isNotEmpty)
                                             ? CachedNetworkImage(
                                                 imageUrl: 'https://image.tmdb.org/t/p/w300${e.stillPath}',
                                                 fit: BoxFit.cover,
+                                                placeholder: (_, _) => Container(color: Colors.white10),
+                                                errorWidget: (_, _, _) => Container(
+                                                  color: Colors.white10,
+                                                  alignment: Alignment.center,
+                                                  child: const Icon(
+                                                    Icons.movie_outlined,
+                                                    color: Colors.white24,
+                                                    size: 28,
+                                                  ),
+                                                ),
                                               )
                                             : Container(color: Colors.white10),
                                       ),

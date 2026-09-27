@@ -32,8 +32,8 @@ class NotificationService {
   static final Map<String, DateTime> _lastSyncTime = {};
   static const Duration _syncDebounce = Duration(seconds: 60);
 
-  static final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
+  static final FlutterLocalNotificationsPlugin
+  _flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
   static RealtimeChannel? _realtimeChannel;
 
@@ -41,7 +41,7 @@ class NotificationService {
   static Future<void> init() async {
     try {
       debugPrint('NotificationService: Initializing notifications...');
-      
+
       // 1. Get or generate the unique local device identifier
       final appUserId = await getAppUserId();
       debugPrint('NotificationService: App User ID: $appUserId');
@@ -52,9 +52,7 @@ class NotificationService {
       // 2. Initialize Platform-Specific Notifications
       if (!kIsWeb && Platform.isWindows) {
         // Setup local_notifier for Windows Toast notifications
-        await localNotifier.setup(
-          appName: 'Lumino',
-        );
+        await localNotifier.setup(appName: 'Lumino');
         debugPrint('NotificationService: Windows Local Notifier initialized.');
       } else if (Platform.isAndroid || Platform.isIOS) {
         // Setup flutter_local_notifications for Android/iOS
@@ -63,28 +61,32 @@ class NotificationService {
 
         const DarwinInitializationSettings initializationSettingsDarwin =
             DarwinInitializationSettings(
-          requestAlertPermission: true,
-          requestBadgePermission: true,
-          requestSoundPermission: true,
-        );
+              requestAlertPermission: true,
+              requestBadgePermission: true,
+              requestSoundPermission: true,
+            );
 
-        const InitializationSettings initializationSettings = InitializationSettings(
-          android: initializationSettingsAndroid,
-          iOS: initializationSettingsDarwin,
-        );
+        const InitializationSettings initializationSettings =
+            InitializationSettings(
+              android: initializationSettingsAndroid,
+              iOS: initializationSettingsDarwin,
+            );
 
         await _flutterLocalNotificationsPlugin.initialize(
           settings: initializationSettings,
           onDidReceiveNotificationResponse: (NotificationResponse response) {
-            debugPrint('NotificationService: Notification clicked with payload: ${response.payload}');
+            debugPrint(
+              'NotificationService: Notification clicked with payload: ${response.payload}',
+            );
           },
         );
-        
+
         // Request permissions for Android 13+ / iOS
         if (Platform.isAndroid) {
           final androidPlugin = _flutterLocalNotificationsPlugin
               .resolvePlatformSpecificImplementation<
-                  AndroidFlutterLocalNotificationsPlugin>();
+                AndroidFlutterLocalNotificationsPlugin
+              >();
           await androidPlugin?.requestNotificationsPermission();
 
           // Create standard high importance notification channel
@@ -98,10 +100,14 @@ class NotificationService {
               enableVibration: true,
             ),
           );
-          debugPrint('NotificationService: Android high importance notification channel created.');
+          debugPrint(
+            'NotificationService: Android high importance notification channel created.',
+          );
         }
-        
-        debugPrint('NotificationService: Mobile Local Notifications initialized.');
+
+        debugPrint(
+          'NotificationService: Mobile Local Notifications initialized.',
+        );
       }
 
       // 3. Sync profile to database (helps register device & restore cross-device watched series)
@@ -129,31 +135,36 @@ class NotificationService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final history = await WatchHistoryService.getHistory();
-      
+
       if (history.isNotEmpty) {
-        final List<String> watched = prefs.getStringList(_watchedSeriesKey) ?? [];
+        final List<String> watched =
+            prefs.getStringList(_watchedSeriesKey) ?? [];
         bool changed = false;
-        
+
         for (var item in history) {
           if (item.mediaType == 'tv') {
             final cleanTitle = _cleanTitle(item.title);
-            
+
             if (cleanTitle.isNotEmpty && !watched.contains(cleanTitle)) {
               watched.add(cleanTitle);
               changed = true;
               final refinedDisplay = _getRefinedDisplayName(item.title);
-              debugPrint('NotificationService: Auto-migrated pre-existing watched series "$refinedDisplay" (Key: "$cleanTitle")');
+              debugPrint(
+                'NotificationService: Auto-migrated pre-existing watched series "$refinedDisplay" (Key: "$cleanTitle")',
+              );
             }
           }
         }
-        
+
         if (changed) {
           await prefs.setStringList(_watchedSeriesKey, watched);
           await syncProfileToCloud(watchedList: watched);
         }
       }
     } catch (e) {
-      debugPrint('NotificationService: Error migrating pre-existing watch history: $e');
+      debugPrint(
+        'NotificationService: Error migrating pre-existing watch history: $e',
+      );
     }
   }
 
@@ -198,7 +209,9 @@ class NotificationService {
         return _cachedAppUserId!;
       }
     } catch (e) {
-      debugPrint('NotificationService: getAppUserId hardware lookup failed, using fallback: $e');
+      debugPrint(
+        'NotificationService: getAppUserId hardware lookup failed, using fallback: $e',
+      );
     }
 
     // ── Generic fallback (Linux / Web / error) ────────────────────────────
@@ -212,7 +225,9 @@ class NotificationService {
     final androidId = info.id; // ANDROID_ID — stable per device+user
     if (androidId.isNotEmpty) {
       final id = _uuidV5(androidId);
-      debugPrint('NotificationService: Android device ID derived from ANDROID_ID.');
+      debugPrint(
+        'NotificationService: Android device ID derived from ANDROID_ID.',
+      );
       // Cache it so other code paths reading SharedPreferences still see it
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_appUserIdKey, id);
@@ -228,7 +243,9 @@ class NotificationService {
     );
     String? id = await storage.read(key: _keychainKey);
     if (id != null && id.isNotEmpty) {
-      debugPrint('NotificationService: iOS/macOS device ID restored from Keychain.');
+      debugPrint(
+        'NotificationService: iOS/macOS device ID restored from Keychain.',
+      );
       // Refresh SharedPreferences cache
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_appUserIdKey, id);
@@ -239,24 +256,29 @@ class NotificationService {
     await storage.write(key: _keychainKey, value: id);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_appUserIdKey, id);
-    debugPrint('NotificationService: iOS/macOS device ID generated and saved to Keychain.');
+    debugPrint(
+      'NotificationService: iOS/macOS device ID generated and saved to Keychain.',
+    );
     return id;
   }
 
   /// Windows: HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid → deterministic UUID v5.
   static Future<String> _getWindowsDeviceId() async {
     try {
-      final result = await Process.run(
-        'reg',
-        ['query', r'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography', '/v', 'MachineGuid'],
-        runInShell: true,
-      );
+      final result = await Process.run('reg', [
+        'query',
+        r'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Cryptography',
+        '/v',
+        'MachineGuid',
+      ], runInShell: true);
       final output = result.stdout.toString();
       final match = RegExp(r'MachineGuid\s+REG_SZ\s+(\S+)').firstMatch(output);
       if (match != null) {
         final machineGuid = match.group(1)!.trim();
         final id = _uuidV5(machineGuid);
-        debugPrint('NotificationService: Windows device ID derived from MachineGuid.');
+        debugPrint(
+          'NotificationService: Windows device ID derived from MachineGuid.',
+        );
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(_appUserIdKey, id);
         return id;
@@ -275,7 +297,9 @@ class NotificationService {
     if (id != null && id.isNotEmpty) return id;
     id = _generateRandomUuid();
     await prefs.setString(_appUserIdKey, id);
-    debugPrint('NotificationService: Fallback device ID generated (not hardware-bound).');
+    debugPrint(
+      'NotificationService: Fallback device ID generated (not hardware-bound).',
+    );
     return id;
   }
 
@@ -353,7 +377,9 @@ class NotificationService {
         isNew = true;
 
         final refinedDisplay = _getRefinedDisplayName(seriesTitle);
-        debugPrint('NotificationService: New series registered "$refinedDisplay" (key: "$cleanTitle")');
+        debugPrint(
+          'NotificationService: New series registered "$refinedDisplay" (key: "$cleanTitle")',
+        );
       }
 
       // Always check/capture the series detail baseline asynchronously.
@@ -367,12 +393,17 @@ class NotificationService {
       //  • For known series, throttle to once per _syncDebounce to avoid spam
       final now = DateTime.now();
       final lastSync = _lastSyncTime[cleanTitle];
-      final shouldSync = isNew || lastSync == null || now.difference(lastSync) >= _syncDebounce;
+      final shouldSync =
+          isNew ||
+          lastSync == null ||
+          now.difference(lastSync) >= _syncDebounce;
 
       if (shouldSync) {
         _lastSyncTime[cleanTitle] = now;
         await syncProfileToCloud(watchedList: watched);
-        debugPrint('NotificationService: Synced "$cleanTitle" to Supabase (isNew: $isNew).');
+        debugPrint(
+          'NotificationService: Synced "$cleanTitle" to Supabase (isNew: $isNew).',
+        );
       }
     } catch (e) {
       debugPrint('NotificationService: Error registering series watch: $e');
@@ -389,7 +420,8 @@ class NotificationService {
       final supabaseUser = Supabase.instance.client.auth.currentUser;
 
       final prefs = await SharedPreferences.getInstance();
-      final watched = watchedList ?? prefs.getStringList(_watchedSeriesKey) ?? [];
+      final watched =
+          watchedList ?? prefs.getStringList(_watchedSeriesKey) ?? [];
 
       debugPrint(
         'NotificationService: Syncing profile → appUserId=$appUserId '
@@ -397,19 +429,20 @@ class NotificationService {
         'watchedCount=${watched.length} series=$watched',
       );
 
-      await Supabase.instance.client
-          .from('user_notification_profiles')
-          .upsert(
-            {
-              'app_user_id': appUserId,
-              'supabase_user_id': supabaseUser?.id,
-              'watched_series': watched,
-              'updated_at': DateTime.now().toUtc().toIso8601String(),
-            },
-            onConflict: 'app_user_id', // ← tells Supabase to UPDATE on duplicate app_user_id
-          );
+      await Supabase.instance.client.from('user_notification_profiles').upsert(
+        {
+          'app_user_id': appUserId,
+          'supabase_user_id': supabaseUser?.id,
+          'watched_series': watched,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        onConflict:
+            'app_user_id', // ← tells Supabase to UPDATE on duplicate app_user_id
+      );
 
-      debugPrint('NotificationService: ✅ Profile synced to Supabase successfully.');
+      debugPrint(
+        'NotificationService: ✅ Profile synced to Supabase successfully.',
+      );
     } catch (e, st) {
       // Log the full error so we can diagnose RLS / schema issues.
       debugPrint('NotificationService: ❌ syncProfileToCloud FAILED: $e\n$st');
@@ -420,23 +453,24 @@ class NotificationService {
   static Future<void> syncCrossDeviceWatchedSeries() async {
     final supabaseUser = Supabase.instance.client.auth.currentUser;
     if (supabaseUser == null) return;
-    
+
     try {
       final appUserId = await getAppUserId();
-      debugPrint('NotificationService: Performing cross-device sync for user ${supabaseUser.id}...');
-      
+      debugPrint(
+        'NotificationService: Performing cross-device sync for user ${supabaseUser.id}...',
+      );
+
       // Fetch all devices' profiles linked to this authenticated user ID
       final response = await Supabase.instance.client
           .from('user_notification_profiles')
           .select('watched_series')
           .eq('supabase_user_id', supabaseUser.id);
-      
+
       if (response.isNotEmpty) {
         // Add current local items
         final prefs = await SharedPreferences.getInstance();
         final localList = prefs.getStringList(_watchedSeriesKey) ?? [];
-        
-        
+
         // Add from all other devices of the same user â€” de-duplicate by cleaned key
         final Map<String, String> deduped = {}; // cleanedKey â†’ originalTitle
         for (final item in localList) {
@@ -463,22 +497,28 @@ class NotificationService {
             }
           }
         }
-        
+
         final mergedList = deduped.values.toList();
         await prefs.setStringList(_watchedSeriesKey, mergedList);
-        
+
         // Update Supabase with the consolidated list
-        await Supabase.instance.client.from('user_notification_profiles').upsert({
-          'app_user_id': appUserId,
-          'supabase_user_id': supabaseUser.id,
-          'watched_series': mergedList,
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-        });
-        
-        debugPrint('NotificationService: Cross-device sync completed! Total subscribed series: ${mergedList.length}');
+        await Supabase.instance.client
+            .from('user_notification_profiles')
+            .upsert({
+              'app_user_id': appUserId,
+              'supabase_user_id': supabaseUser.id,
+              'watched_series': mergedList,
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            });
+
+        debugPrint(
+          'NotificationService: Cross-device sync completed! Total subscribed series: ${mergedList.length}',
+        );
       }
     } catch (e) {
-      debugPrint('NotificationService: Cross-device sync failed (Table may need setup): $e');
+      debugPrint(
+        'NotificationService: Cross-device sync failed (Table may need setup): $e',
+      );
     }
   }
 
@@ -488,38 +528,56 @@ class NotificationService {
       if (_realtimeChannel != null) {
         Supabase.instance.client.removeChannel(_realtimeChannel!);
       }
-      
-      debugPrint('NotificationService: Setting up Realtime subscriber for "new_content_releases"...');
-      
-      _realtimeChannel = Supabase.instance.client.channel('public:new_content_releases');
-      
-      _realtimeChannel!.onPostgresChanges(
-        event: PostgresChangeEvent.insert,
-        schema: 'public',
-        table: 'new_content_releases',
-        callback: (payload) async {
-          debugPrint('NotificationService: Real-time content release insert received: ${payload.newRecord}');
-          await _processContentRelease(payload.newRecord);
-        },
-      ).subscribe((status, [error]) {
-        if (status == RealtimeSubscribeStatus.subscribed) {
-          debugPrint('NotificationService: Successfully subscribed to Realtime Postgres insertions.');
-        } else {
-          debugPrint('NotificationService: Realtime state: $status. Error: $error');
-        }
-      });
+
+      debugPrint(
+        'NotificationService: Setting up Realtime subscriber for "new_content_releases"...',
+      );
+
+      _realtimeChannel = Supabase.instance.client.channel(
+        'public:new_content_releases',
+      );
+
+      _realtimeChannel!
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'new_content_releases',
+            callback: (payload) async {
+              debugPrint(
+                'NotificationService: Real-time content release insert received: ${payload.newRecord}',
+              );
+              await _processContentRelease(payload.newRecord);
+            },
+          )
+          .subscribe((status, [error]) {
+            if (status == RealtimeSubscribeStatus.subscribed) {
+              debugPrint(
+                'NotificationService: Successfully subscribed to Realtime Postgres insertions.',
+              );
+            } else {
+              debugPrint(
+                'NotificationService: Realtime state: $status. Error: $error',
+              );
+            }
+          });
     } catch (e) {
       debugPrint('NotificationService: Realtime setup failed: $e');
     }
   }
 
-  static Future<void> _processContentRelease(Map<String, dynamic> record) async {
+  static Future<void> _processContentRelease(
+    Map<String, dynamic> record,
+  ) async {
     try {
-      final id = record['id'] as int? ?? DateTime.now().millisecondsSinceEpoch % 100000;
+      final id =
+          record['id'] as int? ??
+          DateTime.now().millisecondsSinceEpoch % 100000;
 
       // Prevent duplicate notifications for already processed/delivered releases
       if (await isReleaseProcessed(id)) {
-        debugPrint('NotificationService: Skipping duplicate local notification for release ID $id ("${record['title'] ?? ''}")');
+        debugPrint(
+          'NotificationService: Skipping duplicate local notification for release ID $id ("${record['title'] ?? ''}")',
+        );
         return;
       }
 
@@ -529,40 +587,47 @@ class NotificationService {
       final episode = record['episode'] as int?;
       final episodeTitle = record['episode_title'] as String?;
       final category = record['category'] as String?;
-      
+
       if (title.isEmpty) return;
-      
+
       // 1. Check for Universal Notification
-      if (category == 'trending' || category == 'cinema' || category == 'top_series') {
+      if (category == 'trending' ||
+          category == 'cinema' ||
+          category == 'top_series') {
         String categoryLabel = 'Trending Now';
         if (category == 'cinema') categoryLabel = 'Cinema Releases';
         if (category == 'top_series') categoryLabel = 'Top Series This Week';
-        
+
         final refinedTitle = _getRefinedDisplayName(title);
-        
+
         await markReleaseAsProcessed(id);
         await showLocalNotification(
           id: id,
           title: 'ðŸ”¥ New in $categoryLabel',
-          body: 'Check out "$refinedTitle", which is now available under $categoryLabel!',
+          body:
+              'Check out "$refinedTitle", which is now available under $categoryLabel!',
           payload: 'universal:$mediaType:$title',
         );
         return;
       }
-      
+
       // 2. Check for Dynamic Episode Notification
-      if (mediaType == 'tv' || category == 'episode' || (season != null && episode != null)) {
+      if (mediaType == 'tv' ||
+          category == 'episode' ||
+          (season != null && episode != null)) {
         final prefs = await SharedPreferences.getInstance();
         final watched = prefs.getStringList(_watchedSeriesKey) ?? [];
-        
+
         // Fuzzy match: clean the release title, then check if any watched key
         // is contained within it OR if it starts with a watched key.
         // e.g. watched has "the boys" and release is "The Boys" â†’ match.
         final cleanReleaseTitle = _cleanTitle(title);
-        
+
         String? matchedWatchedKey;
         for (final key in watched) {
-          final cleanKey = _cleanTitle(key); // ensure stored keys are also normalized
+          final cleanKey = _cleanTitle(
+            key,
+          ); // ensure stored keys are also normalized
           if (cleanKey.isEmpty) continue;
           // Primary: exact match after cleaning
           if (cleanReleaseTitle == cleanKey) {
@@ -575,32 +640,39 @@ class NotificationService {
             break;
           }
           // Tertiary: watched key starts with release title (e.g. watched "the boys s1-s5" vs release "the boys")
-          if (cleanKey.startsWith(cleanReleaseTitle) && cleanReleaseTitle.length > 3) {
+          if (cleanKey.startsWith(cleanReleaseTitle) &&
+              cleanReleaseTitle.length > 3) {
             matchedWatchedKey = key;
             break;
           }
         }
-        
+
         if (matchedWatchedKey != null) {
           final sNum = season ?? 1;
           final epNum = episode ?? 1;
-          final epTitleSuffix = (episodeTitle != null && episodeTitle.isNotEmpty)
+          final epTitleSuffix =
+              (episodeTitle != null && episodeTitle.isNotEmpty)
               ? ': "$episodeTitle"'
               : '';
-          
+
           final refinedTitle = _getRefinedDisplayName(title);
-          
-          debugPrint('NotificationService: MATCH! Release "$title" matched watched key "$matchedWatchedKey". Sending notification.');
-          
+
+          debugPrint(
+            'NotificationService: MATCH! Release "$title" matched watched key "$matchedWatchedKey". Sending notification.',
+          );
+
           await markReleaseAsProcessed(id);
           await showLocalNotification(
             id: id,
             title: 'ðŸŽ¬ New Episode of $refinedTitle!',
-            body: 'Season $sNum, Episode $epNum$epTitleSuffix is now streaming!',
+            body:
+                'Season $sNum, Episode $epNum$epTitleSuffix is now streaming!',
             payload: 'episode:tv:$title:$sNum:$epNum',
           );
         } else {
-          debugPrint('NotificationService: No match for release "$title" (cleaned: "$cleanReleaseTitle") in watched list: $watched');
+          debugPrint(
+            'NotificationService: No match for release "$title" (cleaned: "$cleanReleaseTitle") in watched list: $watched',
+          );
         }
       }
     } catch (e) {
@@ -613,25 +685,31 @@ class NotificationService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final lastCheckedStr = prefs.getString(_lastCheckedAtKey);
-      
+
       final now = DateTime.now().toUtc();
-      DateTime lastChecked = now.subtract(const Duration(hours: 4)); // Default lookback
-      
+      DateTime lastChecked = now.subtract(
+        const Duration(hours: 4),
+      ); // Default lookback
+
       if (lastCheckedStr != null) {
         lastChecked = DateTime.parse(lastCheckedStr).toUtc();
       }
-      
-      debugPrint('NotificationService: Catching up on missed releases since $lastChecked...');
-      
+
+      debugPrint(
+        'NotificationService: Catching up on missed releases since $lastChecked...',
+      );
+
       final response = await Supabase.instance.client
           .from('new_content_releases')
           .select()
           .gt('created_at', lastChecked.toIso8601String())
           .order('created_at', ascending: true);
-      
+
       if (response.isNotEmpty) {
-        debugPrint('NotificationService: Found ${response.length} missed releases. Evaluating...');
-        
+        debugPrint(
+          'NotificationService: Found ${response.length} missed releases. Evaluating...',
+        );
+
         final List<Map<String, dynamic>> cinemaItems = [];
         final List<Map<String, dynamic>> topSeriesItems = [];
         final List<Map<String, dynamic>> trendingItems = [];
@@ -652,7 +730,7 @@ class NotificationService {
 
         // Keep only the LATEST 2 from each category (since they are ordered ascending, latest are at the end)
         final List<Map<String, dynamic>> filteredList = [];
-        
+
         if (cinemaItems.length > 2) {
           filteredList.addAll(cinemaItems.sublist(cinemaItems.length - 2));
         } else {
@@ -660,7 +738,9 @@ class NotificationService {
         }
 
         if (topSeriesItems.length > 2) {
-          filteredList.addAll(topSeriesItems.sublist(topSeriesItems.length - 2));
+          filteredList.addAll(
+            topSeriesItems.sublist(topSeriesItems.length - 2),
+          );
         } else {
           filteredList.addAll(topSeriesItems);
         }
@@ -676,22 +756,28 @@ class NotificationService {
 
         // Re-sort chronologically
         filteredList.sort((a, b) {
-          final aTime = DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime.now();
-          final bTime = DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime.now();
+          final aTime =
+              DateTime.tryParse(a['created_at']?.toString() ?? '') ??
+              DateTime.now();
+          final bTime =
+              DateTime.tryParse(b['created_at']?.toString() ?? '') ??
+              DateTime.now();
           return aTime.compareTo(bTime);
         });
 
-        debugPrint('NotificationService: Capped startup notifications to ${filteredList.length} items.');
+        debugPrint(
+          'NotificationService: Capped startup notifications to ${filteredList.length} items.',
+        );
         for (var record in filteredList) {
           await _processContentRelease(record);
         }
       } else {
         debugPrint('NotificationService: No missed releases.');
       }
-      
+
       // Update check time
       await prefs.setString(_lastCheckedAtKey, now.toIso8601String());
-      
+
       // Sync last check time to the database profile
       final appUserId = await getAppUserId();
       await Supabase.instance.client.from('user_notification_profiles').upsert({
@@ -700,7 +786,9 @@ class NotificationService {
         'updated_at': now.toIso8601String(),
       });
     } catch (e) {
-      debugPrint('NotificationService: Failed to check for missed releases: $e');
+      debugPrint(
+        'NotificationService: Failed to check for missed releases: $e',
+      );
     }
   }
 
@@ -743,7 +831,9 @@ class NotificationService {
 
       final existing = await checkQuery.maybeSingle();
       if (existing != null) {
-        debugPrint('NotificationService: Release for "$title" ($category, S${season}E$episode) already exists. Skipping duplicate insert.');
+        debugPrint(
+          'NotificationService: Release for "$title" ($category, S${season}E$episode) already exists. Skipping duplicate insert.',
+        );
         return true;
       }
 
@@ -757,13 +847,17 @@ class NotificationService {
         'category': category,
         'created_at': DateTime.now().toUtc().toIso8601String(),
       });
-      debugPrint('NotificationService: Successfully published new release for "$title".');
+      debugPrint(
+        'NotificationService: Successfully published new release for "$title".',
+      );
       return true;
     } catch (e) {
       // Catch duplicate key / unique constraint exceptions in case database index is triggered concurrently
       final errStr = e.toString();
       if (errStr.contains('duplicate key') || errStr.contains('23505')) {
-        debugPrint('NotificationService: Ignored concurrent duplicate insertion of "$title".');
+        debugPrint(
+          'NotificationService: Ignored concurrent duplicate insertion of "$title".',
+        );
         return true;
       }
       debugPrint('NotificationService: Failed to publish release: $e');
@@ -785,21 +879,23 @@ class NotificationService {
           title: title,
           body: body,
         );
-        
+
         notification.onShow = () {
           debugPrint('NotificationService: Windows Toast displayed.');
         };
-        
+
         await notification.show();
       } else if (Platform.isAndroid || Platform.isIOS) {
-        const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-          'lumino_push_notifications',
-          'Lumino Notifications',
-          channelDescription: 'Notifications for episodes and premium additions',
-          importance: Importance.max,
-          priority: Priority.high,
-        );
-        
+        const AndroidNotificationDetails androidDetails =
+            AndroidNotificationDetails(
+              'lumino_push_notifications',
+              'Lumino Notifications',
+              channelDescription:
+                  'Notifications for episodes and premium additions',
+              importance: Importance.max,
+              priority: Priority.high,
+            );
+
         const NotificationDetails platformDetails = NotificationDetails(
           android: androidDetails,
           iOS: DarwinNotificationDetails(
@@ -808,7 +904,7 @@ class NotificationService {
             presentSound: true,
           ),
         );
-        
+
         await _flutterLocalNotificationsPlugin.show(
           id: id,
           title: title,
@@ -829,8 +925,14 @@ class NotificationService {
     // 2. Remove parenthesized text like (Hindi), (From S1-S4)
     t = t.replaceAll(RegExp(r'\(.*?\)'), '');
     // 3. Remove "From S1-S4", "From S01-S05", "From S1 to S5"
-    t = t.replaceAll(RegExp(r'From\s+S\d+\s*-\s*S\d+', caseSensitive: false), '');
-    t = t.replaceAll(RegExp(r'From\s+S\d+\s*to\s*S\d+', caseSensitive: false), '');
+    t = t.replaceAll(
+      RegExp(r'From\s+S\d+\s*-\s*S\d+', caseSensitive: false),
+      '',
+    );
+    t = t.replaceAll(
+      RegExp(r'From\s+S\d+\s*to\s*S\d+', caseSensitive: false),
+      '',
+    );
     // 4. Remove Season ranges like S1-S5, S01-S05, S1 to S5
     t = t.replaceAll(RegExp(r'S\d+\s*-\s*S\d+', caseSensitive: false), '');
     t = t.replaceAll(RegExp(r'S\d+\s*to\s*S\d+', caseSensitive: false), '');
@@ -854,8 +956,14 @@ class NotificationService {
     // 2. Remove parenthesized text like (Hindi), (From S1-S4)
     t = t.replaceAll(RegExp(r'\(.*?\)'), '');
     // 3. Remove "From S1-S4", "From S01-S05", "From S1 to S5"
-    t = t.replaceAll(RegExp(r'From\s+S\d+\s*-\s*S\d+', caseSensitive: false), '');
-    t = t.replaceAll(RegExp(r'From\s+S\d+\s*to\s*S\d+', caseSensitive: false), '');
+    t = t.replaceAll(
+      RegExp(r'From\s+S\d+\s*-\s*S\d+', caseSensitive: false),
+      '',
+    );
+    t = t.replaceAll(
+      RegExp(r'From\s+S\d+\s*to\s*S\d+', caseSensitive: false),
+      '',
+    );
     // 4. Remove Season ranges like S1-S5, S01-S05, S1 to S5
     t = t.replaceAll(RegExp(r'S\d+\s*-\s*S\d+', caseSensitive: false), '');
     t = t.replaceAll(RegExp(r'S\d+\s*to\s*S\d+', caseSensitive: false), '');
@@ -883,15 +991,23 @@ class NotificationService {
   }
 
   static Future<void> _runPrimeboxCacheCheck() async {
-    debugPrint('NotificationService: Running 30-minute Primebox Cache Check...');
+    debugPrint(
+      'NotificationService: Running 30-minute Primebox Cache Check...',
+    );
     try {
       final List<Map<String, dynamic>> itemsToCheck = [];
 
       // 1. Fetch Home API
       try {
-        final res = await http.get(Uri.parse('${EnvConfig.lambdaUrl}/home'), headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }).timeout(const Duration(seconds: 15));
+        final res = await http
+            .get(
+              Uri.parse('${EnvConfig.lambdaUrl}/home'),
+              headers: {
+                'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              },
+            )
+            .timeout(const Duration(seconds: 15));
         if (res.statusCode == 200) {
           final data = json.decode(res.body)['data'];
           final ops = data['operatingList'] as List?;
@@ -899,12 +1015,14 @@ class NotificationService {
             for (final op in ops) {
               final type = op['type'];
               final opTitle = op['title']?.toString() ?? '';
-              
+
               // Categorize sections inside Home API
               String category = 'trending';
-              if (opTitle.toLowerCase().contains('top series') || opTitle.toLowerCase().contains('series')) {
+              if (opTitle.toLowerCase().contains('top series') ||
+                  opTitle.toLowerCase().contains('series')) {
                 category = 'top_series';
-              } else if (opTitle.toLowerCase().contains('cinema') || opTitle.toLowerCase().contains('movies')) {
+              } else if (opTitle.toLowerCase().contains('cinema') ||
+                  opTitle.toLowerCase().contains('movies')) {
                 category = 'cinema';
               }
 
@@ -948,9 +1066,15 @@ class NotificationService {
 
       // 2. Fetch Movies API (Uses operatingList just like Home API)
       try {
-        final res = await http.get(Uri.parse('${EnvConfig.lambdaUrl}/movie'), headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }).timeout(const Duration(seconds: 15));
+        final res = await http
+            .get(
+              Uri.parse('${EnvConfig.lambdaUrl}/movie'),
+              headers: {
+                'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              },
+            )
+            .timeout(const Duration(seconds: 15));
         if (res.statusCode == 200) {
           final data = json.decode(res.body)['data'];
           final ops = data['operatingList'] as List?;
@@ -992,14 +1116,22 @@ class NotificationService {
           }
         }
       } catch (e) {
-        debugPrint('NotificationService: Movies cache check API fetch error: $e');
+        debugPrint(
+          'NotificationService: Movies cache check API fetch error: $e',
+        );
       }
 
       // 3. Fetch Animation API (Uses items list)
       try {
-        final res = await http.get(Uri.parse('${EnvConfig.lambdaUrl}/animation'), headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }).timeout(const Duration(seconds: 15));
+        final res = await http
+            .get(
+              Uri.parse('${EnvConfig.lambdaUrl}/animation'),
+              headers: {
+                'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              },
+            )
+            .timeout(const Duration(seconds: 15));
         if (res.statusCode == 200) {
           final data = json.decode(res.body)['data'];
           final items = data['items'] as List?;
@@ -1021,7 +1153,9 @@ class NotificationService {
           }
         }
       } catch (e) {
-        debugPrint('NotificationService: Animation cache check API fetch error: $e');
+        debugPrint(
+          'NotificationService: Animation cache check API fetch error: $e',
+        );
       }
 
       // Process newly found items and compare with DB/cache
@@ -1048,17 +1182,21 @@ class NotificationService {
                 .maybeSingle();
 
             if (existing == null) {
-              debugPrint('NotificationService: New global item detected: "$title" (detailPath: $detailPath, category: $category)');
-              
+              debugPrint(
+                'NotificationService: New global item detected: "$title" (detailPath: $detailPath, category: $category)',
+              );
+
               // 1. Always insert into primebox_home_cache so we don't process it again
-              await Supabase.instance.client.from('primebox_home_cache').insert({
-                'title': title,
-                'detail_path': detailPath,
-                'category': category,
-                'app_user_id': appUserId,
-                'supabase_user_id': supabaseUser?.id,
-                'created_at': DateTime.now().toUtc().toIso8601String(),
-              });
+              await Supabase.instance.client
+                  .from('primebox_home_cache')
+                  .insert({
+                    'title': title,
+                    'detail_path': detailPath,
+                    'category': category,
+                    'app_user_id': appUserId,
+                    'supabase_user_id': supabaseUser?.id,
+                    'created_at': DateTime.now().toUtc().toIso8601String(),
+                  });
 
               // 2. Publish to new_content_releases (capped at 2 notifications per section)
               bool shouldPublish = false;
@@ -1080,11 +1218,15 @@ class NotificationService {
                   category: category,
                 );
               } else {
-                debugPrint('NotificationService: Capping reached for category "$category". Registered in cache but not published to new_content_releases.');
+                debugPrint(
+                  'NotificationService: Capping reached for category "$category". Registered in cache but not published to new_content_releases.',
+                );
               }
             }
           } catch (e) {
-            debugPrint('NotificationService: Database error checking/inserting primebox cache: $e');
+            debugPrint(
+              'NotificationService: Database error checking/inserting primebox cache: $e',
+            );
           }
         }
       }
@@ -1104,7 +1246,9 @@ class NotificationService {
   }
 
   static Future<void> _runSeriesDetailCheck() async {
-    debugPrint('NotificationService: Running 3-hour Watched Series Detail Check...');
+    debugPrint(
+      'NotificationService: Running 3-hour Watched Series Detail Check...',
+    );
     try {
       final prefs = await SharedPreferences.getInstance();
       final watchedList = prefs.getStringList(_watchedSeriesKey) ?? [];
@@ -1141,13 +1285,16 @@ class NotificationService {
 
           // If no detailPath was stored, let's search Primebox to resolve it
           if (detailPath == null || detailPath.isEmpty) {
-            debugPrint('NotificationService: Resolving detailPath for series: "$cleanTitle"');
+            debugPrint(
+              'NotificationService: Resolving detailPath for series: "$cleanTitle"',
+            );
             final searchResults = await PrimeboxService.search(cleanTitle);
-            
+
             // Search robustly for a series match
             PrimeboxItem? match;
             for (final item in searchResults) {
-              if (item.subjectType == 2 && _cleanTitle(item.title) == cleanTitle) {
+              if (item.subjectType == 2 &&
+                  _cleanTitle(item.title) == cleanTitle) {
                 match = item;
                 break;
               }
@@ -1164,16 +1311,25 @@ class NotificationService {
             if (match != null && match.detailPath.isNotEmpty) {
               detailPath = match.detailPath;
             } else {
-              debugPrint('NotificationService: Could not resolve Primebox series for: "$cleanTitle"');
+              debugPrint(
+                'NotificationService: Could not resolve Primebox series for: "$cleanTitle"',
+              );
               continue; // Skip this show if we can't find it
             }
           }
 
           // 2. Fetch the latest detail data from Primebox Detail API
-          final detailApi = '${EnvConfig.lambdaUrl}/detail?detailPath=$detailPath';
-          final res = await http.get(Uri.parse(detailApi), headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          }).timeout(const Duration(seconds: 15));
+          final detailApi =
+              '${EnvConfig.lambdaUrl}/detail?detailPath=$detailPath';
+          final res = await http
+              .get(
+                Uri.parse(detailApi),
+                headers: {
+                  'User-Agent':
+                      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                },
+              )
+              .timeout(const Duration(seconds: 15));
 
           if (res.statusCode != 200) continue;
 
@@ -1196,29 +1352,39 @@ class NotificationService {
           // 3. Compare new seasons with old seasons
           if (existing == null) {
             // First time seeing this show for the user. Save the baseline!
-            debugPrint('NotificationService: Storing baseline details for watched series "$cleanTitle"');
-            await Supabase.instance.client.from('user_watched_series_details').insert({
-              'app_user_id': appUserId,
-              'supabase_user_id': supabaseUser?.id,
-              'series_title': cleanTitle,
-              'detail_path': detailPath,
-              'seasons_data': newSeasons,
-              'updated_at': DateTime.now().toUtc().toIso8601String(),
-            });
+            debugPrint(
+              'NotificationService: Storing baseline details for watched series "$cleanTitle"',
+            );
+            await Supabase.instance.client
+                .from('user_watched_series_details')
+                .insert({
+                  'app_user_id': appUserId,
+                  'supabase_user_id': supabaseUser?.id,
+                  'series_title': cleanTitle,
+                  'detail_path': detailPath,
+                  'seasons_data': newSeasons,
+                  'updated_at': DateTime.now().toUtc().toIso8601String(),
+                });
           } else {
             // Compare latest season's episode count
-            newSeasons.sort((a, b) => (a['se'] as int).compareTo(b['se'] as int));
-            
+            newSeasons.sort(
+              (a, b) => (a['se'] as int).compareTo(b['se'] as int),
+            );
+
             // Clean/map old seasons to compare properly
-            final List<Map<String, dynamic>> parsedOldSeasons = oldSeasons.map((s) {
+            final List<Map<String, dynamic>> parsedOldSeasons = oldSeasons.map((
+              s,
+            ) {
               final map = s as Map;
               return {
                 'se': map['se'] as int? ?? 1,
                 'maxEp': map['maxEp'] as int? ?? 0,
               };
             }).toList();
-            
-            parsedOldSeasons.sort((a, b) => (a['se'] as int).compareTo(b['se'] as int));
+
+            parsedOldSeasons.sort(
+              (a, b) => (a['se'] as int).compareTo(b['se'] as int),
+            );
 
             if (newSeasons.isNotEmpty) {
               final newLatest = newSeasons.last;
@@ -1250,15 +1416,18 @@ class NotificationService {
               }
 
               if (episodeCountIncreased) {
-                debugPrint('NotificationService: WATCHED SERIES UPDATE! "$cleanTitle" season $newLatestSeasonNum episode count increased to $newLatestEpCount!');
-                
+                debugPrint(
+                  'NotificationService: WATCHED SERIES UPDATE! "$cleanTitle" season $newLatestSeasonNum episode count increased to $newLatestEpCount!',
+                );
+
                 // Show notification immediately for the user
                 final displayTitle = _getRefinedDisplayName(rawTitle);
                 for (int ep = startEp; ep <= newLatestEpCount; ep++) {
                   await showLocalNotification(
                     id: DateTime.now().millisecondsSinceEpoch % 100000,
                     title: 'ðŸŽ¬ New Episode of $displayTitle!',
-                    body: 'Season $newLatestSeasonNum, Episode $ep is now streaming!',
+                    body:
+                        'Season $newLatestSeasonNum, Episode $ep is now streaming!',
                     payload: 'episode:tv:$cleanTitle:$newLatestSeasonNum:$ep',
                   );
 
@@ -1273,19 +1442,27 @@ class NotificationService {
                 }
 
                 // Update stored details in Supabase
-                await Supabase.instance.client.from('user_watched_series_details').update({
-                  'seasons_data': newSeasons,
-                  'updated_at': DateTime.now().toUtc().toIso8601String(),
-                }).eq('app_user_id', appUserId).eq('series_title', cleanTitle);
+                await Supabase.instance.client
+                    .from('user_watched_series_details')
+                    .update({
+                      'seasons_data': newSeasons,
+                      'updated_at': DateTime.now().toUtc().toIso8601String(),
+                    })
+                    .eq('app_user_id', appUserId)
+                    .eq('series_title', cleanTitle);
               }
             }
           }
         } catch (e) {
-          debugPrint('NotificationService: Error checking watched series detail: $e');
+          debugPrint(
+            'NotificationService: Error checking watched series detail: $e',
+          );
         }
       }
     } catch (e) {
-      debugPrint('NotificationService: Watched series detail check outer error: $e');
+      debugPrint(
+        'NotificationService: Watched series detail check outer error: $e',
+      );
     }
   }
 
@@ -1305,12 +1482,16 @@ class NotificationService {
           .maybeSingle();
 
       if (existing != null) {
-        debugPrint('NotificationService: Baseline for "$cleanTitle" already exists. Skipping Primebox lookup.');
+        debugPrint(
+          'NotificationService: Baseline for "$cleanTitle" already exists. Skipping Primebox lookup.',
+        );
         return;
       }
 
-      debugPrint('NotificationService: Capturing initial baseline detail for missing series: "$cleanTitle"');
-      
+      debugPrint(
+        'NotificationService: Capturing initial baseline detail for missing series: "$cleanTitle"',
+      );
+
       final searchResults = await PrimeboxService.search(cleanTitle);
       PrimeboxItem? match;
       for (final item in searchResults) {
@@ -1329,10 +1510,17 @@ class NotificationService {
       }
 
       if (match != null && match.detailPath.isNotEmpty) {
-        final detailApi = '${EnvConfig.lambdaUrl}/detail?detailPath=${match.detailPath}';
-        final res = await http.get(Uri.parse(detailApi), headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }).timeout(const Duration(seconds: 15));
+        final detailApi =
+            '${EnvConfig.lambdaUrl}/detail?detailPath=${match.detailPath}';
+        final res = await http
+            .get(
+              Uri.parse(detailApi),
+              headers: {
+                'User-Agent':
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              },
+            )
+            .timeout(const Duration(seconds: 15));
 
         if (res.statusCode == 200) {
           final body = json.decode(res.body);
@@ -1348,15 +1536,19 @@ class NotificationService {
                 };
               }).toList();
 
-              await Supabase.instance.client.from('user_watched_series_details').upsert({
-                'app_user_id': appUserId,
-                'supabase_user_id': supabaseUser?.id,
-                'series_title': cleanTitle,
-                'detail_path': match.detailPath,
-                'seasons_data': seasons,
-                'updated_at': DateTime.now().toUtc().toIso8601String(),
-              }, onConflict: 'app_user_id,series_title');
-              debugPrint('NotificationService: Baseline saved for "$cleanTitle"');
+              await Supabase.instance.client
+                  .from('user_watched_series_details')
+                  .upsert({
+                    'app_user_id': appUserId,
+                    'supabase_user_id': supabaseUser?.id,
+                    'series_title': cleanTitle,
+                    'detail_path': match.detailPath,
+                    'seasons_data': seasons,
+                    'updated_at': DateTime.now().toUtc().toIso8601String(),
+                  }, onConflict: 'app_user_id,series_title');
+              debugPrint(
+                'NotificationService: Baseline saved for "$cleanTitle"',
+              );
               return; // SUCCESS - Exit early
             }
           }
@@ -1365,17 +1557,24 @@ class NotificationService {
 
       // FALLBACK: If Primebox search fails (e.g. 422 for short titles like "From")
       // or doesn't return season counts, we MUST STILL record the series in Supabase.
-      await Supabase.instance.client.from('user_watched_series_details').upsert({
-        'app_user_id': appUserId,
-        'supabase_user_id': supabaseUser?.id,
-        'series_title': cleanTitle,
-        'detail_path': match?.detailPath ?? '',
-        'seasons_data': [], // Empty array as fallback
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-      }, onConflict: 'app_user_id,series_title');
-      debugPrint('NotificationService: Fallback baseline saved for "$cleanTitle" (No Primebox detail)');
+      await Supabase.instance.client.from('user_watched_series_details').upsert(
+        {
+          'app_user_id': appUserId,
+          'supabase_user_id': supabaseUser?.id,
+          'series_title': cleanTitle,
+          'detail_path': match?.detailPath ?? '',
+          'seasons_data': [], // Empty array as fallback
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        onConflict: 'app_user_id,series_title',
+      );
+      debugPrint(
+        'NotificationService: Fallback baseline saved for "$cleanTitle" (No Primebox detail)',
+      );
     } catch (e) {
-      debugPrint('NotificationService: Error capturing initial series detail: $e');
+      debugPrint(
+        'NotificationService: Error capturing initial series detail: $e',
+      );
     }
   }
 
@@ -1386,8 +1585,10 @@ class NotificationService {
     if (Platform.isWindows) return;
 
     try {
-      debugPrint('NotificationService: Initializing Firebase Cloud Messaging...');
-      
+      debugPrint(
+        'NotificationService: Initializing Firebase Cloud Messaging...',
+      );
+
       // Request permissions
       final messaging = FirebaseMessaging.instance;
       final settings = await messaging.requestPermission(
@@ -1401,13 +1602,19 @@ class NotificationService {
       );
 
       if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-        debugPrint('NotificationService: User granted push notification permission.');
+        debugPrint(
+          'NotificationService: User granted push notification permission.',
+        );
       } else {
-        debugPrint('NotificationService: User declined push notification permission.');
+        debugPrint(
+          'NotificationService: User declined push notification permission.',
+        );
       }
 
       // Register background handler
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      FirebaseMessaging.onBackgroundMessage(
+        _firebaseMessagingBackgroundHandler,
+      );
 
       // Get FCM token
       final token = await messaging.getToken();
@@ -1424,7 +1631,9 @@ class NotificationService {
 
       // Handle foreground messages when app is active
       FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-        debugPrint('NotificationService: Foreground FCM message received: ${message.notification?.title}');
+        debugPrint(
+          'NotificationService: Foreground FCM message received: ${message.notification?.title}',
+        );
         final releaseIdStr = message.data['release_id'];
         if (releaseIdStr != null) {
           final releaseId = int.tryParse(releaseIdStr);
@@ -1433,7 +1642,6 @@ class NotificationService {
           }
         }
       });
-
     } catch (e) {
       debugPrint('NotificationService: Failed to initialize Firebase FCM: $e');
     }
@@ -1446,7 +1654,9 @@ class NotificationService {
       final supabaseUser = Supabase.instance.client.auth.currentUser;
       final platform = kIsWeb ? 'web' : Platform.operatingSystem;
 
-      debugPrint('NotificationService: Syncing FCM token to Supabase (appUserId: $appUserId, user: ${supabaseUser?.id})...');
+      debugPrint(
+        'NotificationService: Syncing FCM token to Supabase (appUserId: $appUserId, user: ${supabaseUser?.id})...',
+      );
       await Supabase.instance.client.from('user_fcm_tokens').upsert({
         'app_user_id': appUserId,
         'supabase_user_id': supabaseUser?.id,
@@ -1454,10 +1664,14 @@ class NotificationService {
         'device_platform': platform,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       }, onConflict: 'fcm_token');
-      
-      debugPrint('NotificationService: FCM token successfully registered in Supabase.');
+
+      debugPrint(
+        'NotificationService: FCM token successfully registered in Supabase.',
+      );
     } catch (e) {
-      debugPrint('NotificationService: Failed to sync FCM token to Supabase: $e');
+      debugPrint(
+        'NotificationService: Failed to sync FCM token to Supabase: $e',
+      );
     }
   }
 
@@ -1472,7 +1686,9 @@ class NotificationService {
       if (token != null) {
         await _syncFcmToken(token);
       } else {
-        debugPrint('NotificationService: Cannot sync FCM token, token is null.');
+        debugPrint(
+          'NotificationService: Cannot sync FCM token, token is null.',
+        );
       }
     } catch (e) {
       debugPrint('NotificationService: Error in syncFcmTokenToCloud: $e');
@@ -1491,7 +1707,9 @@ class NotificationService {
         final appUserId = await getAppUserId();
         final platform = kIsWeb ? 'web' : Platform.operatingSystem;
 
-        debugPrint('NotificationService: Unlinking FCM token from user in Supabase (appUserId: $appUserId)...');
+        debugPrint(
+          'NotificationService: Unlinking FCM token from user in Supabase (appUserId: $appUserId)...',
+        );
         await Supabase.instance.client.from('user_fcm_tokens').upsert({
           'app_user_id': appUserId,
           'supabase_user_id': null,
@@ -1506,7 +1724,8 @@ class NotificationService {
     }
   }
 
-  static const String _processedReleaseIdsKey = 'notification_processed_release_ids';
+  static const String _processedReleaseIdsKey =
+      'notification_processed_release_ids';
 
   /// Records that a release ID has been notified/processed to prevent duplicate alerts.
   static Future<void> markReleaseAsProcessed(int id) async {
@@ -1545,14 +1764,17 @@ class NotificationService {
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  debugPrint('NotificationService: Handling background FCM message: ${message.messageId}');
-  
+  debugPrint(
+    'NotificationService: Handling background FCM message: ${message.messageId}',
+  );
+
   final releaseIdStr = message.data['release_id'];
   if (releaseIdStr != null) {
     final releaseId = int.tryParse(releaseIdStr);
     if (releaseId != null) {
       final prefs = await SharedPreferences.getInstance();
-      final list = prefs.getStringList('notification_processed_release_ids') ?? [];
+      final list =
+          prefs.getStringList('notification_processed_release_ids') ?? [];
       final idStr = releaseId.toString();
       if (!list.contains(idStr)) {
         list.add(idStr);
@@ -1560,7 +1782,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
           list.removeRange(0, list.length - 100);
         }
         await prefs.setStringList('notification_processed_release_ids', list);
-        debugPrint('NotificationService: Marked background release ID $releaseId as processed in FCM.');
+        debugPrint(
+          'NotificationService: Marked background release ID $releaseId as processed in FCM.',
+        );
       }
     }
   }

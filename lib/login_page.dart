@@ -7,6 +7,7 @@ import 'package:lumino_app_moviestreaming/device_link_service.dart';
 import 'dart:async';
 import 'dart:ui';
 import 'package:hugeicons/hugeicons.dart';
+import 'package:lumino_app_moviestreaming/app_settings_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -21,7 +22,7 @@ class _LoginPageState extends State<LoginPage> {
   final _nameController = TextEditingController();
   bool _isSignUp = false;
   bool _isLoading = false;
-  String _appVersion = 'v1.3.3';
+  String _appVersion = 'v1.3.4';
 
   @override
   void initState() {
@@ -172,7 +173,23 @@ class _LoginPageState extends State<LoginPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const SizedBox(width: 48), // Spacer to balance close button
+                      // Quick App Settings button
+                      IconButton(
+                        tooltip: 'App Settings',
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const AppSettingsPage()),
+                        ),
+                        icon: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.03),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+                          ),
+                          child: const Icon(Icons.settings_outlined, color: Colors.white70, size: 20),
+                        ),
+                      ),
                       // Center Logo / Branding
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),

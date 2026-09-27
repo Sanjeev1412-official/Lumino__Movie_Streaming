@@ -27,8 +27,10 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:lumino_app_moviestreaming/watch_history_service.dart';
 import 'package:lumino_app_moviestreaming/auth_service.dart';
 import 'package:lumino_app_moviestreaming/login_page.dart';
+import 'package:lumino_app_moviestreaming/layout_settings_service.dart';
+import 'package:lumino_app_moviestreaming/app_logo_widget.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart' hide TextDirection;
-
 
 // ---------- Top-level models & helpers for sources from /extract ----------
 
@@ -117,6 +119,7 @@ class DetailsPage extends StatefulWidget {
   final String? primeboxType; // 'Movie' | 'Show'
   final String? initialTitle;
   final String? initialBackdrop;
+
   /// MovieBox subject ID — when set, use MovieBox /details and /links endpoints
   final String? movieboxSubjectId;
 
@@ -412,55 +415,252 @@ class _DetailsPageState extends State<DetailsPage> {
   }
 
   Future<void> _fetchImdbRating(_Details details) async {
-    if (_imdbRating != null && _imdbRating! > 0) return;
-    final imdbId = details.imdbId;
-    if (imdbId == null || imdbId.isEmpty) return;
+    const clientId =
+        'c024bfad7cd0fb2e96ee39bde85e7ae1c3449defe5a6832338fb5ba9adcc139f';
+    final isMovie = (widget.mediaType == 'movie' ||
+        (details.seasons.isEmpty &&
+            details.runtime != null &&
+            details.runtime! > 0));
+    final typePath = isMovie ? 'movies' : 'tv';
 
-    // IMPORTANT: use widget.mediaType from TMDB, not "series"/"movie" from player
-    final typePath = widget.mediaType == 'movie' ? 'movies' : 'tv';
+    String? imdbId = details.imdbId;
 
-    final uri = Uri.parse(
-      'https://api.simkl.com/$typePath/$imdbId'
-      '?extended=full&client_id=c024bfad7cd0fb2e96ee39bde85e7ae1c3449defe5a6832338fb5ba9adcc139f', // put your real client_id
-    );
-
-    if (kDebugMode) {
-      debugPrint('SIMKL rating GET: $uri');
+    // 1. If imdbId is not present, resolve it via TMDB external_ids if TMDB id exists
+    if ((imdbId == null || imdbId.trim().isEmpty) && details.id > 0) {
+      try {
+        final extUri = Uri.parse(
+          '${widget.base}/${isMovie ? 'movie' : 'tv'}/${details.id}/external_ids?api_key=${widget.apiKey}',
+        );
+        final extRes = await _safeGet(extUri);
+        if (extRes != null && extRes.statusCode == 200) {
+          final extJson = json.decode(extRes.body);
+          final foundImdb = extJson['imdb_id']?.toString().trim();
+          if (foundImdb != null && foundImdb.isNotEmpty) {
+            imdbId = foundImdb;
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('[SIMKL] Error fetching external_ids: $e');
+      }
     }
 
-    try {
-      final res = await http.get(uri).timeout(const Duration(seconds: 6));
+    // 2. Query Simkl directly by IMDb ID (fastest and most accurate)
+    if (imdbId != null && imdbId.trim().isNotEmpty) {
+      final cleanImdb = imdbId.trim();
+      final uri = Uri.parse(
+        'https://api.simkl.com/$typePath/$cleanImdb?extended=full&client_id=$clientId',
+      );
 
-      // 404: Simkl doesn't know this ID â†’ just ignore
-      if (res.statusCode == 404) {
-        if (kDebugMode) {
-          debugPrint('SIMKL: no entry for $imdbId (type=$typePath)');
-        }
-        return;
-      }
-
-      if (res.statusCode != 200) {
-        if (kDebugMode) {
-          debugPrint('SIMKL rating error: ${res.statusCode} ${res.body}');
-        }
-        return;
-      }
-
-      final j = json.decode(res.body) as Map<String, dynamic>;
-      final ratings = j['ratings'] as Map<String, dynamic>?;
-      final imdb = ratings?['imdb'] as Map<String, dynamic>?;
-      final ratingVal = imdb?['rating'];
-
-      if (ratingVal is num && mounted) {
-        setState(() {
-          _imdbRating = ratingVal.toDouble();
-        });
-      }
-    } catch (e) {
       if (kDebugMode) {
-        debugPrint('SIMKL rating exception: $e');
+        debugPrint('[SIMKL] Rating GET by IMDb ID: $uri');
+      }
+
+      try {
+        final res = await http.get(uri).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) {
+          final j = json.decode(res.body) as Map<String, dynamic>;
+          final ratings = j['ratings'] as Map<String, dynamic>?;
+          final imdb = ratings?['imdb'] as Map<String, dynamic>?;
+          final ratingVal = imdb?['rating'];
+
+          if (ratingVal is num && ratingVal > 0 && mounted) {
+            setState(() {
+              _imdbRating = ratingVal.toDouble();
+            });
+            if (kDebugMode) {
+              debugPrint(
+                '[SIMKL] Original IMDb rating for $cleanImdb: $_imdbRating',
+              );
+            }
+            return;
+          }
+        } else {
+          // If direct type failed (e.g. 404 or misclassified), search Simkl by IMDb ID to get exact type & simkl id
+          try {
+            final idSearchUri = Uri.parse(
+              'https://api.simkl.com/search/id?imdb=$cleanImdb&client_id=$clientId',
+            );
+            final idSearchRes =
+                await http.get(idSearchUri).timeout(const Duration(seconds: 6));
+            if (idSearchRes.statusCode == 200) {
+              final list = json.decode(idSearchRes.body) as List?;
+              if (list != null && list.isNotEmpty) {
+                final simklId = list.first['ids']?['simkl'];
+                final sType = list.first['type']?.toString();
+                final actualPath =
+                    (sType == 'tv' || sType == 'anime' || sType == 'series')
+                        ? 'tv'
+                        : 'movies';
+                if (simklId != null) {
+                  final fullUri = Uri.parse(
+                    'https://api.simkl.com/$actualPath/$simklId?extended=full&client_id=$clientId',
+                  );
+                  final fullRes = await http
+                      .get(fullUri)
+                      .timeout(const Duration(seconds: 8));
+                  if (fullRes.statusCode == 200) {
+                    final j = json.decode(fullRes.body) as Map<String, dynamic>;
+                    final ratings = j['ratings'] as Map<String, dynamic>?;
+                    final imdb = ratings?['imdb'] as Map<String, dynamic>?;
+                    final ratingVal = imdb?['rating'];
+                    if (ratingVal is num && ratingVal > 0 && mounted) {
+                      setState(() {
+                        _imdbRating = ratingVal.toDouble();
+                      });
+                      if (kDebugMode) {
+                        debugPrint(
+                          '[SIMKL] Original IMDb rating for $cleanImdb (via id search): $_imdbRating',
+                        );
+                      }
+                      return;
+                    }
+                  }
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[SIMKL] Rating by IMDb ID exception: $e');
+        }
       }
     }
+
+    // 3. Fallback: Query Simkl by TMDB ID
+    if (details.id > 0) {
+      try {
+        final searchUri = Uri.parse(
+          'https://api.simkl.com/search/id?tmdb=${details.id}&client_id=$clientId',
+        );
+        if (kDebugMode) {
+          debugPrint('[SIMKL] Rating lookup by TMDB ID: $searchUri');
+        }
+        final searchRes =
+            await http.get(searchUri).timeout(const Duration(seconds: 6));
+        if (searchRes.statusCode == 200) {
+          final list = json.decode(searchRes.body) as List?;
+          if (list != null && list.isNotEmpty) {
+            final simklId = list.first['ids']?['simkl'];
+            final sType = list.first['type']?.toString();
+            final actualPath =
+                (sType == 'tv' || sType == 'anime' || sType == 'series')
+                    ? 'tv'
+                    : 'movies';
+            if (simklId != null) {
+              final fullUri = Uri.parse(
+                'https://api.simkl.com/$actualPath/$simklId?extended=full&client_id=$clientId',
+              );
+              final fullRes =
+                  await http.get(fullUri).timeout(const Duration(seconds: 8));
+              if (fullRes.statusCode == 200) {
+                final j = json.decode(fullRes.body) as Map<String, dynamic>;
+                final ratings = j['ratings'] as Map<String, dynamic>?;
+                final imdb = ratings?['imdb'] as Map<String, dynamic>?;
+                final ratingVal = imdb?['rating'];
+
+                if (ratingVal is num && ratingVal > 0 && mounted) {
+                  setState(() {
+                    _imdbRating = ratingVal.toDouble();
+                  });
+                  if (kDebugMode) {
+                    debugPrint(
+                      '[SIMKL] Original IMDb rating via TMDB ID: $_imdbRating',
+                    );
+                  }
+                  return;
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[SIMKL] Rating by TMDB ID exception: $e');
+        }
+      }
+    }
+
+    // 4. Fallback: Query Simkl by Title
+    if (details.title.trim().isNotEmpty) {
+      try {
+        final cleanTitleStr = _cleanTitle(details.title);
+        final query = Uri.encodeComponent(cleanTitleStr);
+        final searchUri = Uri.parse(
+          'https://api.simkl.com/search/$typePath?q=$query&client_id=$clientId',
+        );
+        if (kDebugMode) {
+          debugPrint('[SIMKL] Rating lookup by title: $searchUri');
+        }
+        final searchRes =
+            await http.get(searchUri).timeout(const Duration(seconds: 6));
+        if (searchRes.statusCode == 200) {
+          final list = json.decode(searchRes.body) as List?;
+          if (list != null && list.isNotEmpty) {
+            final simklId = list.first['ids']?['simkl_id'] ??
+                list.first['ids']?['simkl'];
+            final sType = list.first['type']?.toString();
+            final actualPath =
+                (sType == 'tv' || sType == 'anime' || sType == 'series')
+                    ? 'tv'
+                    : 'movies';
+            if (simklId != null) {
+              final fullUri = Uri.parse(
+                'https://api.simkl.com/$actualPath/$simklId?extended=full&client_id=$clientId',
+              );
+              final fullRes =
+                  await http.get(fullUri).timeout(const Duration(seconds: 8));
+              if (fullRes.statusCode == 200) {
+                final j = json.decode(fullRes.body) as Map<String, dynamic>;
+                final ratings = j['ratings'] as Map<String, dynamic>?;
+                final imdb = ratings?['imdb'] as Map<String, dynamic>?;
+                final ratingVal = imdb?['rating'];
+
+                if (ratingVal is num && ratingVal > 0 && mounted) {
+                  setState(() {
+                    _imdbRating = ratingVal.toDouble();
+                  });
+                  if (kDebugMode) {
+                    debugPrint(
+                      '[SIMKL] Original IMDb rating via title: $_imdbRating',
+                    );
+                  }
+                  return;
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          debugPrint('[SIMKL] Rating by title exception: $e');
+        }
+      }
+    }
+  }
+
+  Future<void> _safePrecache(String? url, {void Function()? onSuccess}) async {
+    if (url == null || url.trim().isEmpty || !mounted) return;
+    if (AppLogoWidget.isSvg(url)) {
+      if (mounted) onSuccess?.call();
+      return;
+    }
+    try {
+      bool failed = false;
+      await precacheImage(
+        CachedNetworkImageProvider(url),
+        context,
+        onError: (exception, stackTrace) {
+          failed = true;
+          if (kDebugMode) {
+            debugPrint('[Precache] Skipped invalid image: $url ($exception)');
+          }
+        },
+      );
+      if (!failed && mounted) {
+        onSuccess?.call();
+      }
+    } catch (_) {}
   }
 
   Future<void> _fetchTmdbLogo(int tmdbId, String mediaType) async {
@@ -480,18 +680,17 @@ class _DetailsPageState extends State<DetailsPage> {
       if (best != null && mounted) {
         final url = 'https://image.tmdb.org/t/p/w500${best['file_path']}';
 
-        // Await the actual image loading into memory
-        try {
-          await precacheImage(NetworkImage(url), context);
-        } catch (e) {
-          if (kDebugMode) debugPrint('Logo precache error: $e');
-        }
-
-        if (mounted) {
-          setState(() {
-            _logoUrl = url;
-          });
-        }
+        // Await the actual image loading into memory safely
+        await _safePrecache(
+          url,
+          onSuccess: () {
+            if (mounted) {
+              setState(() {
+                _logoUrl = url;
+              });
+            }
+          },
+        );
       }
     } catch (e) {
       if (kDebugMode) debugPrint('Logo fetch error: $e');
@@ -508,8 +707,12 @@ class _DetailsPageState extends State<DetailsPage> {
 
   Future<_DetailBundle?> _fetchBundle() async {
     // ── MovieBox path ──────────────────────────────────────────────────────────
-    if (widget.movieboxSubjectId != null && widget.movieboxSubjectId!.isNotEmpty) {
-      if (kDebugMode) debugPrint('[MovieBox] Fetching details for ${widget.movieboxSubjectId}');
+    if (widget.movieboxSubjectId != null &&
+        widget.movieboxSubjectId!.isNotEmpty) {
+      if (kDebugMode)
+        debugPrint(
+          '[MovieBox] Fetching details for ${widget.movieboxSubjectId}',
+        );
       try {
         final mb = await MovieBoxService.getDetails(widget.movieboxSubjectId!);
         if (mb != null) {
@@ -517,8 +720,12 @@ class _DetailsPageState extends State<DetailsPage> {
 
           // Set logo from MovieBox directly (no TMDB call needed)
           if (mb.logo != null && mb.logo!.isNotEmpty && mounted) {
-            try { await precacheImage(NetworkImage(mb.logo!), context); } catch (_) {}
-            if (mounted) setState(() => _logoUrl = mb.logo);
+            await _safePrecache(
+              mb.logo,
+              onSuccess: () {
+                if (mounted) setState(() => _logoUrl = mb.logo);
+              },
+            );
           }
 
           // Also try TMDB logo if tmdbId available
@@ -536,14 +743,17 @@ class _DetailsPageState extends State<DetailsPage> {
           // Build season stubs from episodes
           final seasonStubs = <_SeasonStub>[];
           if (!mb.isMovie) {
-            final seasonNums = mb.episodes.map((e) => e.season).toSet().toList()..sort();
+            final seasonNums = mb.episodes.map((e) => e.season).toSet().toList()
+              ..sort();
             for (final sn in seasonNums) {
               final epCount = mb.episodes.where((e) => e.season == sn).length;
-              seasonStubs.add(_SeasonStub(
-                seasonNumber: sn,
-                name: 'Season $sn',
-                episodeCount: epCount,
-              ));
+              seasonStubs.add(
+                _SeasonStub(
+                  seasonNumber: sn,
+                  name: 'Season $sn',
+                  episodeCount: epCount,
+                ),
+              );
             }
           }
 
@@ -564,8 +774,12 @@ class _DetailsPageState extends State<DetailsPage> {
             genres: mb.genre,
             runtime: mb.duration ?? 0,
             seasons: seasonStubs,
-            firstAirDate: mb.isMovie ? null : (mb.year != null ? '${mb.year}-01-01' : null),
-            releaseDate: mb.isMovie ? (mb.year != null ? '${mb.year}-01-01' : null) : null,
+            firstAirDate: mb.isMovie
+                ? null
+                : (mb.year != null ? '${mb.year}-01-01' : null),
+            releaseDate: mb.isMovie
+                ? (mb.year != null ? '${mb.year}-01-01' : null)
+                : null,
             videos: [],
             imdbId: mb.imdbId,
             trailerUrl: null,
@@ -583,12 +797,16 @@ class _DetailsPageState extends State<DetailsPage> {
           );
 
           final credits = _Credits(
-            cast: mb.actors.map((a) => _Person(
-              id: 0,
-              name: a['name']?.toString() ?? '',
-              profilePath: a['avatar']?.toString(),
-              role: a['character']?.toString(),
-            )).toList(),
+            cast: mb.actors
+                .map(
+                  (a) => _Person(
+                    id: 0,
+                    name: a['name']?.toString() ?? '',
+                    profilePath: a['avatar']?.toString(),
+                    role: a['character']?.toString(),
+                  ),
+                )
+                .toList(),
             directors: [],
             writers: [],
           );
@@ -596,7 +814,14 @@ class _DetailsPageState extends State<DetailsPage> {
           // Load history with MovieBox subject id as a string key
           _loadHistory(currentId: mb.tmdbId ?? 0);
 
-          return _DetailBundle(details: details, credits: credits);
+          // Fetch original IMDb rating from Simkl API
+          _fetchImdbRating(details);
+
+          return _DetailBundle(
+            details: details,
+            credits: credits,
+            recommendations: mb.recommendations,
+          );
         }
       } catch (e) {
         if (kDebugMode) debugPrint('[MovieBox] _fetchBundle error: $e');
@@ -604,8 +829,7 @@ class _DetailsPageState extends State<DetailsPage> {
       // Fallthrough to TMDB if MovieBox fails
     }
 
-    if (widget.primeboxUrl != null &&
-        widget.primeboxUrl!.isNotEmpty) {
+    if (widget.primeboxUrl != null && widget.primeboxUrl!.isNotEmpty) {
       String path = widget.primeboxUrl!;
       if (path.contains('detailPath=')) {
         path = path.split('detailPath=').last;
@@ -613,9 +837,7 @@ class _DetailsPageState extends State<DetailsPage> {
         path = path.split('/detail/').last;
       }
 
-      final uri = Uri.parse(
-        '${EnvConfig.lambdaUrl}/detail?detailPath=$path',
-      );
+      final uri = Uri.parse('${EnvConfig.lambdaUrl}/detail?detailPath=$path');
       if (kDebugMode) debugPrint('Primebox Bundle GET: $uri');
 
       try {
@@ -780,6 +1002,9 @@ class _DetailsPageState extends State<DetailsPage> {
               if (kDebugMode) debugPrint('TMDB Enrichment outer error: $e');
             }
 
+            // Fetch original IMDb rating from Simkl with enriched details
+            _fetchImdbRating(details);
+
             // Fetch logo after TMDB ID is found and AWAIT it
             if (details.id != 0) {
               await _fetchTmdbLogo(details.id, isMovie ? 'movie' : 'tv');
@@ -827,11 +1052,12 @@ class _DetailsPageState extends State<DetailsPage> {
       return _DetailBundle(
         details: details,
         credits: _Credits(cast: [], directors: [], writers: []),
+        recommendations: const [],
       );
     }
 
     final detailUri = Uri.parse(
-      '$b/${widget.mediaType}/$id?api_key=$a&append_to_response=videos,watch/providers,external_ids,images,${widget.mediaType == 'movie' ? 'release_dates' : 'content_ratings'}',
+      '$b/${widget.mediaType}/$id?api_key=$a&append_to_response=videos,watch/providers,external_ids,images,${widget.mediaType == 'movie' ? 'release_dates' : 'content_ratings'},recommendations',
     );
 
     final creditsUri = Uri.parse(
@@ -846,7 +1072,7 @@ class _DetailsPageState extends State<DetailsPage> {
     final detailRes = results[0];
     final creditsRes = results[1];
 
-    // Any failure â†’ null â†’ UI shows No Network or Retry screen
+    // Any failure → null → UI shows No Network or Retry screen
     if (detailRes == null || creditsRes == null) return null;
 
     try {
@@ -869,9 +1095,7 @@ class _DetailsPageState extends State<DetailsPage> {
         final bgUrl = details.backdropPath!.startsWith('http')
             ? details.backdropPath!
             : 'https://image.tmdb.org/t/p/w1280${details.backdropPath}';
-        try {
-          await precacheImage(NetworkImage(bgUrl), context);
-        } catch (_) {}
+        await _safePrecache(bgUrl);
       }
 
       if (widget.mediaType == 'tv' && details.seasons.isNotEmpty) {
@@ -879,7 +1103,48 @@ class _DetailsPageState extends State<DetailsPage> {
         _seasonFuture = _fetchSeason(details.id, _selectedSeasonNumber!);
       }
 
-      return _DetailBundle(details: details, credits: credits);
+      List<MovieBoxRecommendation> recommendations = [];
+      final currentIdStr = details.id.toString();
+      final currentTitleNorm = details.title.toLowerCase().replaceAll(
+        RegExp(r'[^a-z0-9]'),
+        '',
+      );
+      final seenIds = <String>{if (currentIdStr != '0') currentIdStr};
+      final seenTitles = <String>{
+        if (currentTitleNorm.isNotEmpty) currentTitleNorm,
+      };
+
+      final rawRecs = detailsJson['recommendations']?['results'];
+      if (rawRecs is List) {
+        for (final r in rawRecs) {
+          if (r is Map) {
+            try {
+              final rec = MovieBoxRecommendation.fromJson(
+                Map<String, dynamic>.from(r),
+              );
+              final recId = rec.id.trim();
+              final recTitleNorm = rec.title.toLowerCase().replaceAll(
+                RegExp(r'[^a-z0-9]'),
+                '',
+              );
+
+              if (recId.isNotEmpty && seenIds.contains(recId)) continue;
+              if (recTitleNorm.isNotEmpty && seenTitles.contains(recTitleNorm))
+                continue;
+
+              if (recId.isNotEmpty) seenIds.add(recId);
+              if (recTitleNorm.isNotEmpty) seenTitles.add(recTitleNorm);
+              recommendations.add(rec);
+            } catch (_) {}
+          }
+        }
+      }
+
+      return _DetailBundle(
+        details: details,
+        credits: credits,
+        recommendations: recommendations,
+      );
     } catch (_) {
       return null;
     }
@@ -894,13 +1159,17 @@ class _DetailsPageState extends State<DetailsPage> {
     if (eps.isEmpty) return null;
     return _TvSeason(
       seasonNumber: seasonNumber,
-      episodes: eps.map((e) => _Episode(
-        episodeNumber: e.episode,
-        name: e.title,
-        overview: e.description ?? '',
-        runtime: e.runtime ?? 0,
-        stillPath: e.thumbnail,
-      )).toList(),
+      episodes: eps
+          .map(
+            (e) => _Episode(
+              episodeNumber: e.episode,
+              name: e.title,
+              overview: e.description ?? '',
+              runtime: e.runtime ?? 0,
+              stillPath: e.thumbnail,
+            ),
+          )
+          .toList(),
     );
   }
 
@@ -1104,15 +1373,9 @@ class _DetailsPageState extends State<DetailsPage> {
 
   // =============== Link collection: quality -> provider -> url ===============
   final String _fallbackQuality = '1080p';
-  final List<String> _qOrder = const [
-    '4K',
-    '2160p',
-    '1440p',
-    '1080p',
-    '720p',
-    '480p',
-    '360p',
-  ];
+  List<String> get _qOrder => (Platform.isAndroid || Platform.isIOS)
+      ? const ['1080p', '720p', '4K', '2160p', '1440p', '480p', '360p']
+      : const ['4K', '2160p', '1440p', '1080p', '720p', '480p', '360p'];
 
   int _qualIndex(String q) {
     final i = _qOrder.indexOf(q);
@@ -1217,7 +1480,10 @@ class _DetailsPageState extends State<DetailsPage> {
     if (lower == 'lookmovie2') return 'Gamma 2 Server';
     if (lower == 'aoneroom') return 'Delta Server';
     if (lower == 'direct') return 'Direct Server';
-    if (lower == 'torrent' || lower.contains('torrent') || lower.contains('p2p')) return 'P2P Server';
+    if (lower == 'torrent' ||
+        lower.contains('torrent') ||
+        lower.contains('p2p'))
+      return 'P2P Server';
     if (lower == 'cinemaos') return 'Epsilon Server';
 
     return 'Alpha Server';
@@ -1421,21 +1687,24 @@ class _DetailsPageState extends State<DetailsPage> {
 
         // Pass headers for Primebox/Netfilm sources to avoid 403 Access Denied
         Map<String, String>? headers;
-        
+
         // 1. Try to get dynamic headers from MovieBox httpMetadata
         final sourceId = 'http|$quality|$provider';
         if (bundle!.httpMetadata.containsKey(sourceId)) {
           final metaHeaders = bundle.httpMetadata[sourceId]['headers'];
           if (metaHeaders is Map) {
-            headers = metaHeaders.map((k, v) => MapEntry(k.toString(), v.toString()));
+            headers = metaHeaders.map(
+              (k, v) => MapEntry(k.toString(), v.toString()),
+            );
           }
         }
 
         // 2. Fallback to hardcoded headers
-        if (headers == null && (provider.toLowerCase().contains('primebox') ||
-            url.contains('aoneroom.com') ||
-            url.contains('netfilm.world') ||
-            url.contains('fmoviesunblocked.net'))) {
+        if (headers == null &&
+            (provider.toLowerCase().contains('primebox') ||
+                url.contains('aoneroom.com') ||
+                url.contains('netfilm.world') ||
+                url.contains('fmoviesunblocked.net'))) {
           String referer = 'https://netfilm.world/';
           if (url.contains('fmoviesunblocked.net')) {
             referer = 'https://fmoviesunblocked.net/';
@@ -1726,7 +1995,9 @@ class _DetailsPageState extends State<DetailsPage> {
       final subtitles = MovieBoxService.buildSubtitleMap(result.subtitles);
 
       if (kDebugMode) {
-        debugPrint('[MovieBox] ${built.httpSources.length} quality levels, ${result.subtitles.length} subtitles');
+        debugPrint(
+          '[MovieBox] ${built.httpSources.length} quality levels, ${result.subtitles.length} subtitles',
+        );
       }
 
       return _PrimeboxStreamBundle(
@@ -1736,12 +2007,11 @@ class _DetailsPageState extends State<DetailsPage> {
         dubs: const [],
       );
     } catch (e) {
-      if (kDebugMode) debugPrint('[MovieBox] _resolveMovieBoxSources error: $e');
+      if (kDebugMode)
+        debugPrint('[MovieBox] _resolveMovieBoxSources error: $e');
       return _PrimeboxStreamBundle(sources: {}, subtitles: {});
     }
   }
-
-
 
   /// Legacy wrapper kept for download sheet compatibility.
   Future<_PrimeboxStreamBundle> _resolveSources({
@@ -1759,8 +2029,10 @@ class _DetailsPageState extends State<DetailsPage> {
           ? '$mbId|$season|$episode'
           : mbId;
       try {
-        final mbBundle = await _resolveMovieBoxSources(data: mbData)
-            .timeout(const Duration(seconds: 60), onTimeout: () => _PrimeboxStreamBundle(sources: {}, subtitles: {}));
+        final mbBundle = await _resolveMovieBoxSources(data: mbData).timeout(
+          const Duration(seconds: 60),
+          onTimeout: () => _PrimeboxStreamBundle(sources: {}, subtitles: {}),
+        );
         if (mbBundle.sources.isNotEmpty) {
           return mbBundle;
         }
@@ -1768,8 +2040,6 @@ class _DetailsPageState extends State<DetailsPage> {
         if (kDebugMode) debugPrint('[MovieBox] resolve error: $e');
       }
     }
-
-
 
     final directBundle = await _resolveDirectPrimeboxSources(
       isShow: isShow,
@@ -2039,9 +2309,7 @@ class _DetailsPageState extends State<DetailsPage> {
     int? episode,
   }) async {
     final uri = mediaType == 'movie'
-        ? Uri.parse(
-            '${EnvConfig.luminoBackendUrl}/magnet/movie/$imdbId',
-          )
+        ? Uri.parse('${EnvConfig.luminoBackendUrl}/magnet/movie/$imdbId')
         : Uri.parse(
             '${EnvConfig.luminoBackendUrl}/magnet/series/$imdbId/${season ?? 0}/${episode ?? 0}',
           );
@@ -2118,8 +2386,7 @@ class _DetailsPageState extends State<DetailsPage> {
     for (final s in streams) {
       final dynamic magnetField = s['magnet'] ?? s;
 
-      final filesList =
-          s['files'] ?? s['fileList'] ?? s['file_entries'];
+      final filesList = s['files'] ?? s['fileList'] ?? s['file_entries'];
       if (filesList is List && filesList.isNotEmpty) {
         for (var i = 0; i < filesList.length; i++) {
           final f = filesList[i];
@@ -2239,12 +2506,15 @@ class _DetailsPageState extends State<DetailsPage> {
 
     try {
       // 0. MovieBox path — use /links endpoint when we have a subject ID
-      if (widget.movieboxSubjectId != null && widget.movieboxSubjectId!.isNotEmpty) {
+      if (widget.movieboxSubjectId != null &&
+          widget.movieboxSubjectId!.isNotEmpty) {
         final mbData = isShow && seasonNumber != null && episodeNumber != null
             ? '${widget.movieboxSubjectId}|$seasonNumber|$episodeNumber'
             : widget.movieboxSubjectId!;
-        primeboxBundle = await _resolveMovieBoxSources(data: mbData)
-            .timeout(const Duration(seconds: 60), onTimeout: () => _PrimeboxStreamBundle(sources: {}, subtitles: {}));
+        primeboxBundle = await _resolveMovieBoxSources(data: mbData).timeout(
+          const Duration(seconds: 60),
+          onTimeout: () => _PrimeboxStreamBundle(sources: {}, subtitles: {}),
+        );
       }
 
       // 1. Existing Primebox direct + search resolve (fallback)
@@ -2327,13 +2597,15 @@ class _DetailsPageState extends State<DetailsPage> {
             movieboxSubjectId: widget.movieboxSubjectId,
             externalDubs: primeboxBundle.dubs,
             httpMetadata: {
-              ...(primeboxBundle.httpMetadata ?? {}),
+              ...primeboxBundle.httpMetadata,
               if (d.logoPath != null) 'logo': d.logoPath,
               if (d.overview != null) 'plot': d.overview,
               if (d.voteAverage != null) 'rating': d.voteAverage,
               if (d.runtime != null) 'duration': d.runtime,
-              if (d.releaseDate != null && d.releaseDate!.length >= 4) 'year': d.releaseDate!.substring(0, 4)
-              else if (d.firstAirDate != null && d.firstAirDate!.length >= 4) 'year': d.firstAirDate!.substring(0, 4),
+              if (d.releaseDate != null && d.releaseDate!.length >= 4)
+                'year': d.releaseDate!.substring(0, 4)
+              else if (d.firstAirDate != null && d.firstAirDate!.length >= 4)
+                'year': d.firstAirDate!.substring(0, 4),
             },
             initialPosition:
                 (_historyItem != null &&
@@ -2366,33 +2638,47 @@ class _DetailsPageState extends State<DetailsPage> {
 
                     try {
                       // 0. MovieBox path
-                      if (widget.movieboxSubjectId != null && widget.movieboxSubjectId!.isNotEmpty) {
+                      if (widget.movieboxSubjectId != null &&
+                          widget.movieboxSubjectId!.isNotEmpty) {
                         final mbData = '${widget.movieboxSubjectId}|$sn|$en';
                         epBundle = await _resolveMovieBoxSources(data: mbData)
-                            .timeout(const Duration(seconds: 60), onTimeout: () => _PrimeboxStreamBundle(sources: {}, subtitles: {}));
+                            .timeout(
+                              const Duration(seconds: 60),
+                              onTimeout: () => _PrimeboxStreamBundle(
+                                sources: {},
+                                subtitles: {},
+                              ),
+                            );
                       }
 
                       // 1. Primebox fallback
                       if (epBundle.sources.isEmpty) {
-                        final results = await Future.wait([
-                          _resolveDirectPrimeboxSources(
-                            isShow: true,
-                            season: sn,
-                            episode: en,
-                          ),
-                          _resolvePrimeboxSources(
-                            query: query,
-                            isShow: true,
-                            season: sn,
-                            episode: en,
-                          ),
-                        ]).timeout(
-                          const Duration(seconds: 60),
-                          onTimeout: () => [
-                            _PrimeboxStreamBundle(sources: {}, subtitles: {}),
-                            _PrimeboxStreamBundle(sources: {}, subtitles: {}),
-                          ],
-                        );
+                        final results =
+                            await Future.wait([
+                              _resolveDirectPrimeboxSources(
+                                isShow: true,
+                                season: sn,
+                                episode: en,
+                              ),
+                              _resolvePrimeboxSources(
+                                query: query,
+                                isShow: true,
+                                season: sn,
+                                episode: en,
+                              ),
+                            ]).timeout(
+                              const Duration(seconds: 60),
+                              onTimeout: () => [
+                                _PrimeboxStreamBundle(
+                                  sources: {},
+                                  subtitles: {},
+                                ),
+                                _PrimeboxStreamBundle(
+                                  sources: {},
+                                  subtitles: {},
+                                ),
+                              ],
+                            );
 
                         final directBundle = results[0];
                         final searchBundle = results[1];
@@ -2413,7 +2699,8 @@ class _DetailsPageState extends State<DetailsPage> {
                         'httpMetadata': epBundle.httpMetadata,
                       };
                     } catch (e) {
-                      if (kDebugMode) debugPrint('[_onEpisodeSelected Fetch Error] $e');
+                      if (kDebugMode)
+                        debugPrint('[_onEpisodeSelected Fetch Error] $e');
                       return null;
                     }
                   }
@@ -2563,6 +2850,8 @@ class _DetailsPageState extends State<DetailsPage> {
                                   alignment: _isDesktop
                                       ? Alignment.topCenter
                                       : Alignment.center,
+                                  placeholder: (_, _) => const ColoredBox(color: Color(0xFF0C0D12)),
+                                  errorWidget: (_, _, _) => const ColoredBox(color: Color(0xFF0C0D12)),
                                 ),
                                 // 2. Blurred image masked with a gradient (butter smooth transition)
                                 ShaderMask(
@@ -2590,6 +2879,8 @@ class _DetailsPageState extends State<DetailsPage> {
                                       alignment: _isDesktop
                                           ? Alignment.topCenter
                                           : Alignment.center,
+                                      placeholder: (_, _) => const ColoredBox(color: Color(0xFF0C0D12)),
+                                      errorWidget: (_, _, _) => const ColoredBox(color: Color(0xFF0C0D12)),
                                     ),
                                   ),
                                 ),
@@ -2605,8 +2896,12 @@ class _DetailsPageState extends State<DetailsPage> {
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
                             colors: [
-                              Colors.black.withValues(alpha: _isDesktop ? 0.1 : 0.4),
-                              Colors.black.withValues(alpha: _isDesktop ? 0.3 : 0.5),
+                              Colors.black.withValues(
+                                alpha: _isDesktop ? 0.1 : 0.4,
+                              ),
+                              Colors.black.withValues(
+                                alpha: _isDesktop ? 0.3 : 0.5,
+                              ),
                               Colors.black.withValues(alpha: 0.6),
                               Colors.black.withValues(alpha: 0.85),
                               Colors.black,
@@ -2716,66 +3011,38 @@ class _DetailsPageState extends State<DetailsPage> {
                           ),
                         ),
 
-                        // Storyline
+                        // Storyline Section
                         SliverToBoxAdapter(
                           child: Padding(
                             padding: EdgeInsets.fromLTRB(
                               _isDesktop ? 40 : 16,
-                              12,
+                              16,
                               _isDesktop ? 40 : 16,
                               0,
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Story Line',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                _ExpandableText(d.overview ?? 'No overview.'),
-                              ],
+                            child: _ModernStorylineSection(
+                              overview: d.overview ?? '',
+                              isDesktop: _isDesktop,
                             ),
                           ),
                         ),
                         // Cast & Crew
-                        ...[
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              _isDesktop ? 40 : 16,
-                              20,
-                              _isDesktop ? 40 : 16,
-                              0,
-                            ),
-                            child: const Text(
-                              'Cast and Crew',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
+                        if (LayoutSettingsService().current.showCastPanel &&
+                            c.cast.isNotEmpty) ...[
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.only(
+                                top: 24,
+                                bottom: 8,
+                              ),
+                              child: _ModernCastSection(
+                                people: c.cast.take(25).toList(),
+                                imgW185: widget.imgW185,
+                                isDesktop: _isDesktop,
                               ),
                             ),
                           ),
-                        ),
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              _isDesktop ? 35 : 8,
-                              0,
-                              0,
-                              0,
-                            ),
-                            child: _PeopleRow(
-                              title: '',
-                              people: c.cast.take(20).toList(),
-                              imgW185: widget.imgW185,
-                            ),
-                          ),
-                        ),
-                      ],
+                        ],
                         // Episodes
                         if (widget.mediaType == 'tv' &&
                             d.seasons.isNotEmpty) ...[
@@ -2974,13 +3241,17 @@ class _DetailsPageState extends State<DetailsPage> {
                                                         'Search episode by name or number...',
                                                     hintStyle: TextStyle(
                                                       color: Colors.white
-                                                          .withValues(alpha: 0.3),
+                                                          .withValues(
+                                                            alpha: 0.3,
+                                                          ),
                                                       fontSize: 13,
                                                     ),
                                                     prefixIcon: Icon(
                                                       Icons.search_rounded,
                                                       color: Colors.white
-                                                          .withValues(alpha: 0.3),
+                                                          .withValues(
+                                                            alpha: 0.3,
+                                                          ),
                                                       size: 20,
                                                     ),
                                                     suffixIcon:
@@ -3166,6 +3437,34 @@ class _DetailsPageState extends State<DetailsPage> {
                             ),
                           ),
                         ],
+                        // Recommendations / More Like This
+                        if (LayoutSettingsService()
+                                .current
+                                .showRecommendations &&
+                            bundle.recommendations.isNotEmpty) ...[
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.only(
+                                top: 24,
+                                bottom: 8,
+                              ),
+                              child: _RecommendationsSection(
+                                recommendations: bundle.recommendations,
+                                currentTitle: d.displayTitle,
+                                currentSubjectId:
+                                    widget.movieboxSubjectId ??
+                                    (d.id != 0 ? d.id.toString() : null),
+                                apiKey: widget.apiKey,
+                                base: widget.base,
+                                imgW185: widget.imgW185,
+                                imgW500: widget.imgW500,
+                                imgW780: widget.imgW780,
+                                linkApiBase: widget.linkApiBase,
+                                isDesktop: _isDesktop,
+                              ),
+                            ),
+                          ),
+                        ],
                         // Extra bottom padding for home bar / nav bar
                         SliverToBoxAdapter(
                           child: SafeArea(
@@ -3277,17 +3576,19 @@ class _DetailsPageState extends State<DetailsPage> {
           playButtonSection
         else
           Expanded(flex: 3, child: playButtonSection),
-        const SizedBox(width: 12),
-        Column(
-          children: [
-            _IconButton3D(
-              onPressed: onDownload,
-              icon: Icons.download_for_offline_rounded,
-            ),
-            if (historyItem != null && historyItem.duration > 0)
-              const SizedBox(height: 18),
-          ],
-        ),
+        if (LayoutSettingsService().current.showDownloadButtons) ...[
+          const SizedBox(width: 12),
+          Column(
+            children: [
+              _IconButton3D(
+                onPressed: onDownload,
+                icon: Icons.download_for_offline_rounded,
+              ),
+              if (historyItem != null && historyItem.duration > 0)
+                const SizedBox(height: 18),
+            ],
+          ),
+        ],
         const SizedBox(width: 12),
         Column(
           children: [
@@ -3345,7 +3646,9 @@ class _DetailsPageState extends State<DetailsPage> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.bold,
-              color: color != null ? color.withValues(alpha: 0.9) : Colors.white70,
+              color: color != null
+                  ? color.withValues(alpha: 0.9)
+                  : Colors.white70,
             ),
           ),
         ],
@@ -3436,20 +3739,19 @@ class _HeroInfoPanel extends StatelessWidget {
           builder: (ctx, c) {
             final halfScreen = MediaQuery.of(context).size.width * 0.5;
             final logoH = c.maxWidth < 400 ? 80.0 : 120.0;
-            return logoUrl != null
+            return (logoUrl != null && logoUrl!.trim().isNotEmpty)
                 ? ConstrainedBox(
                     constraints: BoxConstraints(
                       minWidth: halfScreen,
                       maxWidth: halfScreen,
                     ),
-                    child: CachedNetworkImage(
-                      imageUrl: logoUrl!,
+                    child: AppLogoWidget(
+                      url: logoUrl!,
                       height: logoH,
                       fit: BoxFit.contain,
                       alignment: Alignment.centerLeft,
-                      fadeInDuration: const Duration(milliseconds: 400),
-                      placeholder: (context, url) => SizedBox(height: logoH),
-                      errorWidget: (context, url, error) => _titleText(),
+                      placeholder: SizedBox(height: logoH),
+                      errorBuilder: (_) => _titleText(),
                     ),
                   )
                 : _titleText();
@@ -3505,7 +3807,8 @@ class _HeroInfoPanel extends StatelessWidget {
             ),
           ),
 
-        if (mediaType == 'tv' && (status != null || nextAirDate != null || lastAirDate != null)) ...[
+        if (mediaType == 'tv' &&
+            (status != null || nextAirDate != null || lastAirDate != null)) ...[
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -3564,46 +3867,98 @@ class _HeroInfoPanel extends StatelessWidget {
           const SizedBox(height: 14),
         ],
 
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            // Watch Now
-            if (isDesktop)
-              SizedBox(
-                width: 220,
-                child: _PlayButton3D(
-                  onPressed: onPlay,
-                  mediaType: mediaType,
-                  historyItem: historyItem,
-                ),
-              )
-            else
-              Expanded(
-                child: _PlayButton3D(
-                  onPressed: onPlay,
-                  mediaType: mediaType,
-                  historyItem: historyItem,
-                ),
-              ),
+        _buildActionButtons(
+          context: context,
+          isDesktop: isDesktop,
+          mediaType: mediaType,
+          historyItem: historyItem,
+          onPlay: onPlay,
+          onTrailer: onTrailer,
+          onDownload: onDownload,
+        ),
+      ],
+    );
+  }
 
-            const SizedBox(width: 10),
+  Widget _buildActionButtons({
+    required BuildContext context,
+    required bool isDesktop,
+    required String mediaType,
+    required WatchHistoryItem? historyItem,
+    required VoidCallback onPlay,
+    required VoidCallback onTrailer,
+    required VoidCallback onDownload,
+  }) {
+    final bool showTrailer = LayoutSettingsService().current.showTrailer;
+    final bool showDownload = LayoutSettingsService().current.showDownloadButtons;
 
-            // Trailer
+    if (isDesktop) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 220,
+            child: _PlayButton3D(
+              onPressed: onPlay,
+              mediaType: mediaType,
+              historyItem: historyItem,
+            ),
+          ),
+          if (showTrailer) ...[
+            const SizedBox(width: 12),
             _SecondaryButton3D(
               onPressed: onTrailer,
               label: 'Trailer',
               icon: Icons.play_circle_outline_rounded,
-            ),
-
-            const SizedBox(width: 10),
-
-            // Download
-            _IconButton3D(
-              onPressed: onDownload,
-              icon: Icons.download_for_offline_rounded,
+              width: 130,
             ),
           ],
+          if (showDownload) ...[
+            const SizedBox(width: 12),
+            _SecondaryButton3D(
+              onPressed: onDownload,
+              label: 'Download',
+              icon: Icons.download_for_offline_rounded,
+              width: 140,
+            ),
+          ],
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _PlayButton3D(
+          onPressed: onPlay,
+          mediaType: mediaType,
+          historyItem: historyItem,
         ),
+        if (showTrailer || showDownload) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              if (showTrailer)
+                Expanded(
+                  child: _SecondaryButton3D(
+                    onPressed: onTrailer,
+                    label: 'Trailer',
+                    icon: Icons.play_circle_outline_rounded,
+                  ),
+                ),
+              if (showTrailer && showDownload)
+                const SizedBox(width: 10),
+              if (showDownload)
+                Expanded(
+                  child: _SecondaryButton3D(
+                    onPressed: onDownload,
+                    label: 'Download',
+                    icon: Icons.download_for_offline_rounded,
+                  ),
+                ),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -3631,23 +3986,40 @@ class _HeroInfoPanel extends StatelessWidget {
   );
 
   Widget _ratingBadge(double rating) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     decoration: BoxDecoration(
-      color: const Color(0xFFFFB561).withValues(alpha: 0.2),
+      color: const Color(0xFFF5C518).withValues(alpha: 0.15),
       borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: const Color(0xFFFFB561).withValues(alpha: 0.5)),
+      border: Border.all(color: const Color(0xFFF5C518).withValues(alpha: 0.4)),
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.star_rounded, size: 14, color: Color(0xFFFFB561)),
-        const SizedBox(width: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF5C518),
+            borderRadius: BorderRadius.circular(3),
+          ),
+          child: const Text(
+            'IMDb',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              color: Colors.black,
+              letterSpacing: -0.2,
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+        const Icon(Icons.star_rounded, size: 15, color: Color(0xFFF5C518)),
+        const SizedBox(width: 3),
         Text(
           rating.toStringAsFixed(1),
           style: const TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w800,
-            color: Color(0xFFFFB561),
+            color: Color(0xFFF5C518),
           ),
         ),
       ],
@@ -3725,7 +4097,12 @@ class _HeroInfoPanel extends StatelessWidget {
     );
   }
 
-  Widget _epBadge({required String prefix, required String date, int? season, int? episode}) {
+  Widget _epBadge({
+    required String prefix,
+    required String date,
+    int? season,
+    int? episode,
+  }) {
     String label = '$prefix Episode';
     if (season != null && episode != null) {
       label = '$prefix: S$season.E$episode';
@@ -3736,7 +4113,9 @@ class _HeroInfoPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFFFB561).withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFFFB561).withValues(alpha: 0.3)),
+        border: Border.all(
+          color: const Color(0xFFFFB561).withValues(alpha: 0.3),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -4096,81 +4475,264 @@ class _ExpandableTextState extends State<_ExpandableText> {
   }
 }
 
-class _PeopleRow extends StatelessWidget {
-  final String title;
+class _ModernCastSection extends StatelessWidget {
   final List<_Person> people;
   final String imgW185;
-  const _PeopleRow({
-    required this.title,
+  final bool isDesktop;
+
+  const _ModernCastSection({
     required this.people,
     required this.imgW185,
+    required this.isDesktop,
   });
+
   @override
   Widget build(BuildContext context) {
     if (people.isEmpty) return const SizedBox.shrink();
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 380;
+    final double cardWidth = isDesktop ? 104.0 : (isSmallScreen ? 82.0 : 92.0);
+    final double avatarSize = isDesktop ? 78.0 : (isSmallScreen ? 64.0 : 72.0);
+    const double verticalPadding = 10.0;
+    final double sectionHeight = avatarSize + 56 + (verticalPadding * 2);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(bottom: 8, right: 16),
-          child: Text(
-            title,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          padding: EdgeInsets.symmetric(horizontal: isDesktop ? 40 : 16),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 20,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFFFE3B5), Color(0xFFFFB561)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Top Cast',
+                style: GoogleFonts.outfit(
+                  color: Colors.white,
+                  fontSize: isSmallScreen ? 17 : 20,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFB561).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: const Color(0xFFFFB561).withValues(alpha: 0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  '${people.length}',
+                  style: GoogleFonts.outfit(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFFFFB561),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
+        const SizedBox(height: 8),
         SizedBox(
-          height: 86,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.only(right: 16),
-            itemBuilder: (_, i) {
-              final p = people[i];
-              final img = p.profilePath != null
-                  ? (p.profilePath!.startsWith('http')
-                      ? p.profilePath!
-                      : '$imgW185${p.profilePath}')
-                  : null;
-              return SizedBox(
-                width: 120,
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 26,
-                      backgroundColor: const Color(0xFF2A2F3B),
-                      backgroundImage: img != null ? NetworkImage(img) : null,
-                      child: img == null ? const Icon(Icons.person) : null,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            p.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            p.role ?? '',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-            separatorBuilder: (_, _) => const SizedBox(width: 12),
-            itemCount: people.length,
+          height: sectionHeight,
+          child: ScrollConfiguration(
+            behavior: const _AppScrollBehavior(),
+            child: ListView.separated(
+              clipBehavior: Clip.none,
+              padding: EdgeInsets.symmetric(
+                horizontal: isDesktop ? 40 : 16,
+                vertical: verticalPadding,
+              ),
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: people.length,
+              separatorBuilder: (_, _) =>
+                  SizedBox(width: isSmallScreen ? 10 : 14),
+              itemBuilder: (context, i) => _CastCard(
+                person: people[i],
+                cardWidth: cardWidth,
+                avatarSize: avatarSize,
+                imgW185: imgW185,
+              ),
+            ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _CastCard extends StatefulWidget {
+  final _Person person;
+  final double cardWidth;
+  final double avatarSize;
+  final String imgW185;
+
+  const _CastCard({
+    required this.person,
+    required this.cardWidth,
+    required this.avatarSize,
+    required this.imgW185,
+  });
+
+  @override
+  State<_CastCard> createState() => _CastCardState();
+}
+
+class _CastCardState extends State<_CastCard> {
+  bool _isHovered = false;
+
+  String _getInitials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return '?';
+    if (parts.length == 1) return parts.first[0].toUpperCase();
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.person;
+    final img = p.profilePath != null && p.profilePath!.isNotEmpty
+        ? (p.profilePath!.startsWith('http')
+              ? p.profilePath!
+              : '${widget.imgW185}${p.profilePath}')
+        : null;
+
+    final hasRole = p.role != null && p.role!.trim().isNotEmpty;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: AnimatedScale(
+        scale: _isHovered ? 1.06 : 1.0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+        child: SizedBox(
+          width: widget.cardWidth,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Avatar with glowing ring
+              Container(
+                width: widget.avatarSize,
+                height: widget.avatarSize,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: _isHovered
+                        ? const Color(0xFFFFB561)
+                        : Colors.white.withValues(alpha: 0.15),
+                    width: _isHovered ? 2.5 : 2.0,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _isHovered
+                          ? const Color(0xFFFFB561).withValues(alpha: 0.3)
+                          : Colors.black.withValues(alpha: 0.45),
+                      blurRadius: _isHovered ? 14 : 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ClipOval(
+                  child: img != null
+                      ? CachedNetworkImage(
+                          imageUrl: img,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Container(
+                            color: const Color(0xFF1E222D),
+                            child: const Center(
+                              child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Color(0xFFFFB561),
+                                ),
+                              ),
+                            ),
+                          ),
+                          errorWidget: (context, url, error) =>
+                              _buildInitialsFallback(p.name),
+                        )
+                      : _buildInitialsFallback(p.name),
+                ),
+              ),
+              const SizedBox(height: 8),
+              // Actor Name
+              Text(
+                p.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.outfit(
+                  color: Colors.white.withValues(alpha: 0.95),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.2,
+                ),
+              ),
+              const SizedBox(height: 2),
+              // Role / Character Name
+              Text(
+                hasRole ? p.role! : 'Actor',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.outfit(
+                  color: hasRole
+                      ? const Color(0xFFFFB561).withValues(alpha: 0.85)
+                      : Colors.white.withValues(alpha: 0.4),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInitialsFallback(String name) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF282D3B), Color(0xFF171A23)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Text(
+          _getInitials(name),
+          style: GoogleFonts.outfit(
+            color: const Color(0xFFFFB561),
+            fontSize: widget.avatarSize * 0.32,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -4311,26 +4873,27 @@ class _EpisodeCard extends StatelessWidget {
                         ),
                       ),
 
-                    // Download button â€” top right
-                    Positioned(
-                      top: 6,
-                      right: 6,
-                      child: GestureDetector(
-                        onTap: onDownload,
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.6),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            Icons.download_for_offline_rounded,
-                            color: Colors.white.withValues(alpha: 0.9),
-                            size: 26,
+                    // Download button — top right
+                    if (LayoutSettingsService().current.showDownloadButtons)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: GestureDetector(
+                          onTap: onDownload,
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.6),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.download_for_offline_rounded,
+                              color: Colors.white.withValues(alpha: 0.9),
+                              size: 26,
+                            ),
                           ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -4450,7 +5013,12 @@ Widget _ratingChip(double? v) {
 class _DetailBundle {
   final _Details details;
   final _Credits credits;
-  _DetailBundle({required this.details, required this.credits});
+  final List<MovieBoxRecommendation> recommendations;
+  _DetailBundle({
+    required this.details,
+    required this.credits,
+    this.recommendations = const [],
+  });
 }
 
 class _Details {
@@ -4645,7 +5213,10 @@ class _Details {
 
     String? imdb;
     try {
-      if (j['external_ids'] is Map) {
+      if (j['imdb_id'] is String &&
+          (j['imdb_id'] as String).trim().isNotEmpty) {
+        imdb = (j['imdb_id'] as String).trim();
+      } else if (j['external_ids'] is Map) {
         imdb = (j['external_ids'] as Map)['imdb_id'] as String?;
       }
     } catch (_) {
@@ -4656,7 +5227,10 @@ class _Details {
     try {
       final logos = j['images']?['logos'] as List?;
       if (logos != null && logos.isNotEmpty) {
-        final enLogo = logos.firstWhere((img) => img['iso_639_1'] == 'en', orElse: () => logos.first);
+        final enLogo = logos.firstWhere(
+          (img) => img['iso_639_1'] == 'en',
+          orElse: () => logos.first,
+        );
         parsedLogo = enLogo['file_path'];
         if (parsedLogo != null) {
           parsedLogo = 'https://image.tmdb.org/t/p/w500$parsedLogo';
@@ -4888,6 +5462,8 @@ class _BackdropHalf extends StatelessWidget {
                 imageUrl: url!,
                 fit: BoxFit.cover,
                 alignment: Alignment.topCenter,
+                placeholder: (_, _) => Container(color: Colors.black26),
+                errorWidget: (_, _, _) => Container(color: Colors.black26),
               ),
             ),
             Positioned.fill(
@@ -4968,7 +5544,7 @@ class _PlayButton3D extends StatelessWidget {
       onTap: onPressed,
       child: SizedBox(
         width: double.infinity,
-        height: 46,
+        height: 51,
         child: Stack(
           children: [
             // Bottom shadow/depth
@@ -4990,7 +5566,7 @@ class _PlayButton3D extends StatelessWidget {
               right: 0,
               top: 0,
               child: Container(
-                height: 40,
+                height: 46,
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
                     begin: Alignment.topCenter,
@@ -5066,6 +5642,143 @@ class _PlayButton3D extends StatelessWidget {
   }
 }
 
+class _ModernPlayButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final String mediaType;
+  final WatchHistoryItem? historyItem;
+
+  const _ModernPlayButton({
+    required this.onPressed,
+    required this.mediaType,
+    this.historyItem,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _PlayButton3D(
+      onPressed: onPressed,
+      mediaType: mediaType,
+      historyItem: historyItem,
+    );
+  }
+}
+
+class _SecondaryButton3D extends StatelessWidget {
+  final VoidCallback onPressed;
+  final String label;
+  final IconData icon;
+  final double? width;
+
+  const _SecondaryButton3D({
+    required this.onPressed,
+    required this.label,
+    required this.icon,
+    this.width,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: SizedBox(
+        width: width ?? double.infinity,
+        height: 46,
+        child: Stack(
+          children: [
+            // Bottom shadow/depth
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Colors.grey[400]!.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+            ),
+            // Main button
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: Container(
+                height: 40,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.white,
+                      Colors.grey[100]!,
+                      Colors.grey[300]!,
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.2),
+                      offset: const Offset(0, 3),
+                      blurRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(icon, color: Colors.black, size: 16),
+                        const SizedBox(width: 6),
+                        Text(
+                          label.toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.4,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ModernSecondaryButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final String label;
+  final IconData icon;
+  final double? width;
+
+  const _ModernSecondaryButton({
+    required this.onPressed,
+    required this.label,
+    required this.icon,
+    this.width,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _SecondaryButton3D(
+      onPressed: onPressed,
+      label: label,
+      icon: icon,
+      width: width,
+    );
+  }
+}
+
 class _IconButton3D extends StatelessWidget {
   final VoidCallback onPressed;
   final IconData icon;
@@ -5128,94 +5841,593 @@ class _IconButton3D extends StatelessWidget {
   }
 }
 
-class _SecondaryButton3D extends StatelessWidget {
-  final VoidCallback onPressed;
-  final String label;
-  final IconData icon;
+// ==================== RECOMMENDATIONS / MORE LIKE THIS ====================
 
-  const _SecondaryButton3D({
-    required this.onPressed,
-    required this.label,
-    required this.icon,
+class _RecommendationsSection extends StatelessWidget {
+  final List<MovieBoxRecommendation> recommendations;
+  final String? currentTitle;
+  final String? currentSubjectId;
+  final String apiKey;
+  final String base;
+  final String imgW185;
+  final String imgW500;
+  final String imgW780;
+  final String linkApiBase;
+  final bool isDesktop;
+
+  const _RecommendationsSection({
+    required this.recommendations,
+    this.currentTitle,
+    this.currentSubjectId,
+    required this.apiKey,
+    required this.base,
+    required this.imgW185,
+    required this.imgW500,
+    required this.imgW780,
+    required this.linkApiBase,
+    required this.isDesktop,
   });
+
+  static String _normalize(String s) {
+    return s
+        .toLowerCase()
+        .replaceAll(RegExp(r'\(\d{4}\)'), '')
+        .replaceAll(RegExp(r'[^a-z0-9]'), '')
+        .trim();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onPressed,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 50, maxWidth: 100),
-        child: SizedBox(
-          height: 46,
-          child: Stack(
+    final currentNorm = currentTitle != null ? _normalize(currentTitle!) : '';
+    final currentId = currentSubjectId?.trim() ?? '';
+
+    final seenIds = <String>{if (currentId.isNotEmpty) currentId};
+    final seenTitles = <String>{if (currentNorm.isNotEmpty) currentNorm};
+
+    final filteredList = <MovieBoxRecommendation>[];
+    for (final item in recommendations) {
+      final id = item.id.trim();
+      final normTitle = _normalize(item.title);
+      if (id.isNotEmpty && seenIds.contains(id)) continue;
+      if (normTitle.isNotEmpty && seenTitles.contains(normTitle)) continue;
+
+      if (id.isNotEmpty) seenIds.add(id);
+      if (normTitle.isNotEmpty) seenTitles.add(normTitle);
+      filteredList.add(item);
+    }
+
+    if (filteredList.isEmpty) return const SizedBox.shrink();
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 380;
+    final double cardWidth = isDesktop
+        ? 155.0
+        : (isSmallScreen ? 115.0 : 130.0);
+    const double verticalPadding = 16.0;
+    final double cardHeight = cardWidth * 1.5 + (isSmallScreen ? 50 : 60);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: isDesktop ? 40 : 16),
+          child: Row(
             children: [
-              // Bottom shadow/depth
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[400]!.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(20),
+              Container(
+                width: 4,
+                height: 20,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFFFE3B5), Color(0xFFFFB561)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
                   ),
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              // Main button
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 0,
-                child: Container(
-                  height: 40,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.white,
-                        Colors.grey[100]!,
-                        Colors.grey[300]!,
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.2),
-                        offset: const Offset(0, 3),
-                        blurRadius: 5,
-                      ),
-                    ],
+              const SizedBox(width: 10),
+              Text(
+                'More Like This',
+                style: GoogleFonts.outfit(
+                  color: Colors.white,
+                  fontSize: isSmallScreen ? 17 : 20,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFB561).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: const Color(0xFFFFB561).withValues(alpha: 0.3),
+                    width: 1,
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 5),
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(icon, color: Colors.black, size: 16),
-                          const SizedBox(width: 6),
-                          Text(
-                            label.toUpperCase(),
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.4,
-                              color: Colors.black,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                ),
+                child: Text(
+                  '${filteredList.length}',
+                  style: GoogleFonts.outfit(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFFFFB561),
                   ),
                 ),
               ),
             ],
           ),
         ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: cardHeight + (verticalPadding * 2),
+          child: ScrollConfiguration(
+            behavior: const _AppScrollBehavior(),
+            child: ListView.separated(
+              clipBehavior: Clip.none,
+              padding: EdgeInsets.symmetric(
+                horizontal: isDesktop ? 40 : 16,
+                vertical: verticalPadding,
+              ),
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: filteredList.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 14),
+              itemBuilder: (context, i) => _RecommendationCard(
+                item: filteredList[i],
+                width: cardWidth,
+                apiKey: apiKey,
+                base: base,
+                imgW185: imgW185,
+                imgW500: imgW500,
+                imgW780: imgW780,
+                linkApiBase: linkApiBase,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _RecommendationCard extends StatefulWidget {
+  final MovieBoxRecommendation item;
+  final double width;
+  final String apiKey;
+  final String base;
+  final String imgW185;
+  final String imgW500;
+  final String imgW780;
+  final String linkApiBase;
+
+  const _RecommendationCard({
+    required this.item,
+    required this.width,
+    required this.apiKey,
+    required this.base,
+    required this.imgW185,
+    required this.imgW500,
+    required this.imgW780,
+    required this.linkApiBase,
+  });
+
+  @override
+  State<_RecommendationCard> createState() => _RecommendationCardState();
+}
+
+class _RecommendationCardState extends State<_RecommendationCard> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
+    final rawPoster = item.poster;
+    final imageUrl = rawPoster != null && rawPoster.isNotEmpty
+        ? (rawPoster.startsWith('http')
+              ? rawPoster
+              : '${widget.imgW500}$rawPoster')
+        : null;
+
+    final hasRating =
+        item.ratingLabel.isNotEmpty &&
+        item.ratingLabel != '0.0' &&
+        item.ratingLabel != '0';
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => DetailsPage(
+                apiKey: widget.apiKey,
+                base: widget.base,
+                imgW185: widget.imgW185,
+                imgW500: widget.imgW500,
+                imgW780: widget.imgW780,
+                id: int.tryParse(item.id) ?? 0,
+                mediaType: item.isMovie ? 'movie' : 'tv',
+                linkApiBase: widget.linkApiBase,
+                movieboxSubjectId: item.id,
+                initialTitle: item.title,
+                initialBackdrop: item.poster,
+              ),
+            ),
+          );
+        },
+        child: AnimatedScale(
+          scale: _isHovered ? 1.04 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          child: SizedBox(
+            width: widget.width,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+
+                      boxShadow: [
+                        BoxShadow(
+                          color: _isHovered
+                              ? const Color(0xFFFFB561).withValues(alpha: 0.15)
+                              : Colors.black.withValues(alpha: 0.4),
+                          blurRadius: _isHovered ? 16 : 10,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(15),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          imageUrl != null
+                              ? CachedNetworkImage(
+                                  imageUrl: imageUrl,
+                                  fit: BoxFit.cover,
+                                  placeholder: (context, url) => Container(
+                                    color: const Color(0xFF161922),
+                                    child: const Center(
+                                      child: SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Color(0xFFFFB561),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  errorWidget: (context, url, error) =>
+                                      Container(
+                                        color: const Color(0xFF161922),
+                                        child: const Icon(
+                                          Icons.broken_image_rounded,
+                                          color: Colors.white24,
+                                          size: 30,
+                                        ),
+                                      ),
+                                )
+                              : Container(
+                                  color: const Color(0xFF161922),
+                                  child: const Icon(
+                                    Icons.movie_outlined,
+                                    color: Colors.white24,
+                                    size: 30,
+                                  ),
+                                ),
+
+                          // Subtle shadow gradient overlay
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.black.withValues(alpha: 0.3),
+                                    Colors.transparent,
+                                    Colors.transparent,
+                                    Colors.black.withValues(alpha: 0.75),
+                                  ],
+                                  stops: const [0.0, 0.25, 0.6, 1.0],
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Type Badge (top-left)
+                          Positioned(
+                            top: 8,
+                            left: 8,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2.5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.65),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.12),
+                                ),
+                              ),
+                              child: Text(
+                                item.isMovie ? 'MOVIE' : 'SERIES',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white70,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Rating Badge (top-right)
+                          if (hasRating)
+                            Positioned(
+                              top: 8,
+                              right: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2.5,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.65),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.12),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.star_rounded,
+                                      color: Color(0xFFFFB561),
+                                      size: 11,
+                                    ),
+                                    const SizedBox(width: 2.5),
+                                    Text(
+                                      item.ratingLabel,
+                                      style: GoogleFonts.outfit(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.outfit(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    if (item.yearLabel.isNotEmpty) ...[
+                      Text(
+                        item.yearLabel,
+                        style: GoogleFonts.outfit(
+                          color: Colors.white.withValues(alpha: 0.45),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        ' • ',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.25),
+                          fontSize: 10,
+                        ),
+                      ),
+                    ],
+                    Text(
+                      item.isMovie ? 'Movie' : 'Series',
+                      style: GoogleFonts.outfit(
+                        color: Colors.white.withValues(alpha: 0.45),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
+    );
+  }
+}
+
+class _ModernStorylineSection extends StatelessWidget {
+  final String overview;
+  final bool isDesktop;
+
+  const _ModernStorylineSection({
+    required this.overview,
+    required this.isDesktop,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Section Header matching Top Cast & More Like This
+        Row(
+          children: [
+            Container(
+              width: 4,
+              height: 20,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFFFE3B5), Color(0xFFFFB561)],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Story Line',
+              style: GoogleFonts.outfit(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        // Glassmorphic Card Container
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.035),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.06),
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: _ModernExpandableText(
+            text: overview.trim().isNotEmpty
+                ? overview
+                : 'No plot synopsis is currently available for this title.',
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ModernExpandableText extends StatefulWidget {
+  final String text;
+  final int collapsedLines;
+
+  const _ModernExpandableText({required this.text, this.collapsedLines = 4});
+
+  @override
+  State<_ModernExpandableText> createState() => _ModernExpandableTextState();
+}
+
+class _ModernExpandableTextState extends State<_ModernExpandableText> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final textStyle = GoogleFonts.outfit(
+      fontSize: 14.5,
+      height: 1.6,
+      color: Colors.white.withValues(alpha: 0.78),
+      fontWeight: FontWeight.w400,
+      letterSpacing: 0.2,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final span = TextSpan(text: widget.text, style: textStyle);
+        final tp = TextPainter(
+          text: span,
+          maxLines: widget.collapsedLines,
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: constraints.maxWidth);
+
+        final bool exceeds = tp.didExceedMaxLines;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOutCubic,
+              alignment: Alignment.topCenter,
+              child: Stack(
+                children: [
+                  Text(
+                    widget.text,
+                    style: textStyle,
+                    maxLines: _expanded ? null : widget.collapsedLines,
+                    overflow: _expanded
+                        ? TextOverflow.visible
+                        : TextOverflow.clip,
+                  ),
+                ],
+              ),
+            ),
+            if (exceeds) ...[
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: () => setState(() => _expanded = !_expanded),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 4,
+                    horizontal: 2,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _expanded ? 'Show Less' : 'Read Full Story',
+                        style: GoogleFonts.outfit(
+                          color: const Color(0xFFFFB561),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        _expanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        color: const Color(0xFFFFB561),
+                        size: 18,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
     );
   }
 }

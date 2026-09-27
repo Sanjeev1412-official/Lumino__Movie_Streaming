@@ -30,6 +30,11 @@ import 'package:lumino_app_moviestreaming/notification_service.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:flutter_volume_controller/flutter_volume_controller.dart';
+import 'package:lumino_app_moviestreaming/subtitle_settings_service.dart';
+import 'package:lumino_app_moviestreaming/player_subtitle_settings_page.dart';
+import 'package:lumino_app_moviestreaming/player_settings_service.dart';
+import 'package:lumino_app_moviestreaming/app_logo_widget.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // --- NEW: resize modes ---
 enum _ResizeMode { fit, zoom, stretch }
@@ -140,9 +145,11 @@ class VideoPlayerScreen extends StatefulWidget {
     this.externalDubs,
     this.httpMetadata,
     this.isLiveTv = false,
+    this.isTrailer = false,
   });
 
   final bool isOffline;
+  final bool isTrailer;
   final String? videoUrl;
 
   final String? posterPath;
@@ -160,7 +167,12 @@ class VideoPlayerScreen extends StatefulWidget {
 
 //                                                             vvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 class _VideoPlayerScreenState extends State<VideoPlayerScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  static const String chromeUserAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+      'AppleWebKit/537.36 (KHTML, like Gecko) '
+      'Chrome/124.0.0.0 Safari/537.36';
+
   // media_kit core
   late final Player _player;
   late final VideoController _videoController;
@@ -217,12 +229,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   String? _selectedProviderLabel; // HTTP provider or torrent label for display
   String? _selectedSourceId; // 'http|quality|provider' or 'torrent|hash'
   bool _selectedIsTorrent = false;
+  int _consecutiveReadErrors = 0;
 
   // Torrent backend state
   String? _currentTorrentStreamId;
 
   // Gesture controls (Mobile: Right = Volume, Left = Brightness)
   double _volume = 1.0; // 0.0 to 1.0
+  double _lastUnmutedVolume = 1.0;
   double _brightness = 1.0; // 0.01 to 1.0
   bool _showVolumeHud = false;
   bool _showBrightnessHud = false;
@@ -251,6 +265,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   Timer? _seekRippleTimer;
 
   Future<void> _initNativeControls() async {
+    if (_isDesktop) return;
     try {
       if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         await FlutterVolumeController.updateShowSystemUI(false);
@@ -308,7 +323,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   Future<void> _setNativeBrightness(double val) async {
-    if (kIsWeb) return;
+    if (kIsWeb || _isDesktop) return;
     try {
       await ScreenBrightness.instance.setApplicationScreenBrightness(val);
     } catch (e) {
@@ -318,10 +333,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   Future<void> _setNativeVolume(double val) async {
     try {
-      _player.setVolume((val * 250.0).clamp(0.0, 350.0));
+      _player.setVolume(_isDesktop ? (val * 100.0) : (val * 250.0).clamp(0.0, 350.0));
     } catch (_) {}
 
-    if (kIsWeb) return;
+    if (kIsWeb || _isDesktop) return;
     try {
       await FlutterVolumeController.setVolume(val);
     } catch (e) {
@@ -345,6 +360,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     DragStartDetails details,
     BoxConstraints constraints,
   ) {
+    if (_isDesktop) return;
+    if (!PlayerSettingsService().current.enableSwipeBrightnessVolume) {
+      _isDraggingLeft = null;
+      return;
+    }
     final x = details.localPosition.dx;
     final y = details.localPosition.dy;
     final width = constraints.maxWidth;
@@ -375,6 +395,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     DragUpdateDetails details,
     BoxConstraints constraints,
   ) {
+    if (_isDesktop) return;
     if (_isDraggingLeft == null) return;
 
     // 3. Miss-touch protection: Accumulate movement until threshold is passed
@@ -419,6 +440,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _onVerticalDragEnd(DragEndDetails details) {
+    if (_isDesktop) return;
     _isDraggingLeft = null;
     _hasExceededSlop = false;
     _accumulatedDy = 0.0;
@@ -426,6 +448,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _onVerticalDragCancel() {
+    if (_isDesktop) return;
     _isDraggingLeft = null;
     _hasExceededSlop = false;
     _accumulatedDy = 0.0;
@@ -433,19 +456,35 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _onDoubleTapDown(TapDownDetails details, BoxConstraints constraints) {
+    if (_isDesktop) {
+      if (isfullscreen) {
+        _exitWindowFullscreen();
+      } else {
+        _enterWindowFullscreen();
+      }
+      return;
+    }
+
+    final settings = PlayerSettingsService().current;
     final width = constraints.maxWidth;
     final x = details.localPosition.dx;
-    if (x < width * 0.4) {
+
+    if (settings.enableDoubleTapSeek && x < width * 0.4) {
       _triggerSeek(isLeft: true);
-    } else if (x > width * 0.6) {
+      return;
+    }
+    if (settings.enableDoubleTapSeek && x > width * 0.6) {
       _triggerSeek(isLeft: false);
-    } else {
+      return;
+    }
+    if (settings.enableDoubleTapPause) {
       _togglePlayPause();
     }
   }
 
   void _triggerSeek({required bool isLeft}) {
-    _seekBy(Duration(seconds: isLeft ? -10 : 10));
+    final seekSec = PlayerSettingsService().current.seekDurationSeconds;
+    _seekBy(Duration(seconds: isLeft ? -seekSec : seekSec));
 
     setState(() {
       if (isLeft) {
@@ -461,7 +500,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         }
         _showRightSeekRipple = true;
       }
-      _seekAccumulatedSeconds += 10;
+      _seekAccumulatedSeconds += seekSec;
       _seekAnimTriggerKey++;
     });
 
@@ -546,9 +585,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   Future<void> _fetchDetailsFromApi(String subjectId) async {
     try {
       final res = await http.get(
-        Uri.parse(
-          '${EnvConfig.lambdaUrl}/details?id=$subjectId',
-        ),
+        Uri.parse('${EnvConfig.lambdaUrl}/details?id=$subjectId'),
       );
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
@@ -600,6 +637,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   bool _isHoveringSlider = false;
   double? _hoverValue;
 
+  // Playback speed rate
+  double _playbackRate = 1.0;
+
   // --- NEW: current resize mode (default = fit) ---
   _ResizeMode _resizeMode = _ResizeMode.fit;
 
@@ -638,6 +678,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       {}; // season -> episodes
 
   bool get _hasEpisodeOverlay =>
+      PlayerSettingsService().current.enableEpisodeOverlay &&
       widget.isTvShow &&
       widget.tmdbId != null &&
       widget.tmdbApiBase != null &&
@@ -650,6 +691,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   String? _lastGoodProviderLabel;
   bool _lastGoodIsTorrent = false;
   String? _lastGoodSourceId;
+  bool _isFallingBack = false;
+  final Set<String> _failedSourceIds = <String>{};
 
   late final FocusNode _keyboardFocusNode;
 
@@ -670,6 +713,160 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   _stickySubtitle; // <-- NEW: preserve selection across quality switches
 
   bool isfullscreen = false;
+
+  Future<void> _setPlaybackRate(double rate) async {
+    setState(() {
+      _playbackRate = rate;
+    });
+    try {
+      await _player.setRate(rate);
+      if (mounted) {
+        AppToast.show(context, 'Playback speed: ${rate}x');
+      }
+    } catch (e) {
+      debugPrint('Error setting playback rate: $e');
+    }
+  }
+
+  void _openSpeedDialog() {
+    _hideControlsTimer?.cancel();
+    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+          decoration: BoxDecoration(
+            color: const Color(0xFF141721),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Playback Speed',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: speeds.map((s) {
+                  final isSelected = (_playbackRate - s).abs() < 0.05;
+                  return InkWell(
+                    onTap: () {
+                      _setPlaybackRate(s);
+                      Navigator.pop(ctx);
+                    },
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? const Color(0xFFFFB561).withValues(alpha: 0.15)
+                            : Colors.white.withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isSelected
+                              ? const Color(0xFFFFB561)
+                              : Colors.white.withValues(alpha: 0.06),
+                        ),
+                      ),
+                      child: Text(
+                        '${s}x',
+                        style: TextStyle(
+                          color: isSelected
+                              ? const Color(0xFFFFB561)
+                              : Colors.white70,
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.w500,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        );
+      },
+    ).then((_) {
+      if (_isPlaying) {
+        _restartHideControlsTimer();
+      }
+    });
+  }
+
+  Future<void> _setNativePipEnabled(bool enabled) async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    try {
+      const platform = MethodChannel('apk_installer');
+      await platform.invokeMethod('setPipEnabled', {'enabled': enabled});
+    } catch (_) {}
+  }
+
+  void _updateNativePipState() {
+    final shouldEnable =
+        PlayerSettingsService().current.enablePip && _isPlaying;
+    _setNativePipEnabled(shouldEnable);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      if (mounted && PlayerSettingsService().current.enablePip && _isPlaying) {
+        setState(() {
+          _showControls = false;
+          _showTracksPanel = false;
+          _showQualityPanel = false;
+          _showEpisodeOverlay = false;
+        });
+        _enterPipMode();
+      }
+    }
+  }
+
+  Future<void> _enterPipMode() async {
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        setState(() {
+          _showControls = false;
+          _showTracksPanel = false;
+          _showQualityPanel = false;
+          _showEpisodeOverlay = false;
+        });
+        const platform = MethodChannel('apk_installer');
+        await platform.invokeMethod('enterPip');
+      } catch (e) {
+        debugPrint('Error entering PiP: $e');
+      }
+    }
+  }
 
   void _cycleResizeMode() {
     setState(() {
@@ -845,6 +1042,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _updateNativePipState();
+    _playbackRate = PlayerSettingsService().current.defaultPlaybackSpeed;
     _currentEpisodeTitle = widget.episodeTitle;
     _currentSeason = widget.initialSeason;
     _currentEpisode = widget.initialEpisode;
@@ -871,20 +1071,65 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       duration: const Duration(milliseconds: 300),
     );
 
-    // IMPORTANT: increase bufferSize for smoother streaming (esp. torrent HTTP proxy)
+    // IMPORTANT: increase bufferSize for smoother streaming (esp. mobile networks & torrent HTTP proxy)
     _player = Player(
       configuration: const PlayerConfiguration(
-        // 128 MB cache. You can push this to 256 MB if device RAM is fine.
-        bufferSize: 128 * 1024 * 1024,
+        // 256 MB cache for large buffer duration
+        bufferSize: 256 * 1024 * 1024,
       ),
     );
     try {
-      (_player.platform as dynamic)?.setProperty('volume-max', '350');
+      final p = (_player.platform as dynamic);
+      p?.setProperty('volume-max', '350');
+      p?.setProperty('user-agent', chromeUserAgent);
+      p?.setProperty('cache', 'yes');
+      p?.setProperty('demuxer-readahead-secs', '180');
+      p?.setProperty('cache-secs', '180');
+      p?.setProperty('cache-pause', 'yes');
+      p?.setProperty('cache-pause-wait', '3');
+      p?.setProperty('cache-pause-initial', 'yes');
+      p?.setProperty('demuxer-max-bytes', (256 * 1024 * 1024).toString());
+      p?.setProperty('demuxer-max-back-bytes', (64 * 1024 * 1024).toString());
+      p?.setProperty('demuxer-lavf-buffersize', '2097152');
+      p?.setProperty('stream-buffer-size', '4194304');
+      p?.setProperty(
+        'demuxer-lavf-o',
+        'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0,seg_max_retry=10,buffer_size=4194304,tcp_nodelay=1,http_persistent=0',
+      );
+      p?.setProperty(
+        'stream-lavf-o',
+        'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5,reconnect_on_network_error=1,reconnect_on_http_error=4xx,5xx,buffer_size=4194304',
+      );
+      p?.setProperty('network-timeout', '60');
+      p?.setProperty('vd-lavc-threads', '4');
     } catch (_) {}
     _videoController = VideoController(_player);
     _previewPlayer = Player(
-      configuration: const PlayerConfiguration(bufferSize: 16 * 1024 * 1024),
+      configuration: const PlayerConfiguration(bufferSize: 32 * 1024 * 1024),
     );
+    try {
+      final pp = (_previewPlayer?.platform as dynamic);
+      pp?.setProperty('user-agent', chromeUserAgent);
+      pp?.setProperty('cache', 'yes');
+      pp?.setProperty('audio', 'no');
+      pp?.setProperty('aid', 'no');
+      pp?.setProperty('sub', 'no');
+      pp?.setProperty('sid', 'no');
+      pp?.setProperty('hr-seek', 'no');
+      pp?.setProperty('pause', 'yes');
+      pp?.setProperty('demuxer-readahead-secs', '30');
+      pp?.setProperty('demuxer-lavf-buffersize', '1048576');
+      pp?.setProperty('stream-buffer-size', '2097152');
+      pp?.setProperty(
+        'demuxer-lavf-o',
+        'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0,seg_max_retry=10,buffer_size=2097152,tcp_nodelay=1,http_persistent=0',
+      );
+      pp?.setProperty(
+        'stream-lavf-o',
+        'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5,reconnect_on_network_error=1,reconnect_on_http_error=4xx,5xx,buffer_size=2097152',
+      );
+      pp?.setProperty('network-timeout', '60');
+    } catch (_) {}
     _previewController = VideoController(_previewPlayer!);
 
     _listenToPlayer();
@@ -923,7 +1168,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   Future<void> _saveCurrentProgress() async {
-    if (!_hasOpenedSource || _isSwitching || widget.isLiveTv) return;
+    if (!_hasOpenedSource || _isSwitching || widget.isLiveTv || widget.isTrailer) return;
 
     // Don't save if we're at the very beginning or end
     if (_position.inSeconds < 5) return;
@@ -1293,11 +1538,21 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                       child: SizedBox(
                                         width: 120,
                                         height: 70,
-                                        child: e.stillPath != null
+                                        child: (e.stillPath != null && e.stillPath!.trim().isNotEmpty)
                                             ? CachedNetworkImage(
                                                 imageUrl:
                                                     'https://image.tmdb.org/t/p/w300${e.stillPath}',
                                                 fit: BoxFit.cover,
+                                                placeholder: (_, _) => Container(color: Colors.white10),
+                                                errorWidget: (_, _, _) => Container(
+                                                  color: Colors.white10,
+                                                  alignment: Alignment.center,
+                                                  child: const Icon(
+                                                    Icons.movie_outlined,
+                                                    color: Colors.white24,
+                                                    size: 28,
+                                                  ),
+                                                ),
                                               )
                                             : Container(color: Colors.white10),
                                       ),
@@ -1399,6 +1654,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       setState(() {
         _isPlaying = playing;
       });
+      _updateNativePipState();
 
       if (playing) {
         _playPauseController.forward();
@@ -1420,6 +1676,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
     _positionSub = _player.stream.position.listen((pos) {
       if (!mounted) return;
+      if (_consecutiveReadErrors > 0 && pos > Duration.zero) {
+        _consecutiveReadErrors = 0;
+      }
+      if (pos > Duration.zero && _selectedSourceId != null) {
+        _failedSourceIds.remove(_selectedSourceId);
+      }
       // Don't fight the user's drag or reset during quality switching.
       if (_isScrubbing || _isSwitching) return;
       setState(() {
@@ -1442,7 +1704,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     });
 
     _tracksSub = _player.stream.tracks.listen((tracks) {
-      _updateTracksFromState();
+      _updateTracksFromState(tracks);
     });
 
     _volumeSub = _player.stream.volume.listen((vol) {
@@ -1462,9 +1724,37 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       debugPrint('PLAYER ERROR: $err');
       if (!mounted) return;
 
-      if (_isTransientLookMovieReadError(err)) {
-        debugPrint('Ignoring transient LookMovie HLS read warning.');
+      // 1. External subtitles and non-fatal stream warnings must never break video playback
+      if (_isNonFatalError(err)) {
+        debugPrint('Ignored non-fatal player error: $err');
         return;
+      }
+
+      // 2. Low-level socket read timeouts that FFmpeg retries internally
+      if (_isTransientReadError(err)) {
+        _consecutiveReadErrors++;
+        debugPrint(
+          'Transient network read error/warning count: $_consecutiveReadErrors: $err',
+        );
+        if (_consecutiveReadErrors < 3) {
+          return;
+        }
+        debugPrint(
+          'Multiple consecutive read timeouts ($_consecutiveReadErrors). Attempting stream recovery...',
+        );
+        _consecutiveReadErrors = 0;
+      }
+
+      // 3. Avoid duplicate or recursive fallback loops
+      if (_isFallingBack || _isSwitching) {
+        debugPrint(
+          'PLAYER ERROR: Already falling back or switching, ignoring duplicate trigger.',
+        );
+        return;
+      }
+
+      if (_selectedSourceId != null) {
+        _failedSourceIds.add(_selectedSourceId!);
       }
 
       setState(() {
@@ -1475,7 +1765,47 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       // If current source is torrent, go back to default HTTP
       if (_selectedIsTorrent) {
         await _fallbackToDefaultSource(resumePosition: _position);
+        return;
       }
+
+      // If 4K HTTP source failed or timed out, step down to 1080p
+      if (_selectedQuality.toUpperCase().contains('4K') ||
+          _selectedQuality.contains('2160')) {
+        final s = _currentHttpSources;
+        final targetQ = s.keys.firstWhere(
+          (k) => _getBaseQuality(k).toLowerCase() == '1080p',
+          orElse: () => '',
+        );
+        if (targetQ.isNotEmpty && s[targetQ]!.isNotEmpty) {
+          final candidateProvs = s[targetQ]!.keys.where(
+            (p) => !_failedSourceIds.contains(_httpSourceId(targetQ, p)),
+          );
+          if (candidateProvs.isNotEmpty) {
+            AppToast.show(
+              context,
+              '4K stream timed out, switching to 1080p...',
+            );
+            final prov = candidateProvs.contains(_selectedProviderLabel)
+                ? _selectedProviderLabel!
+                : candidateProvs.first;
+            final url = s[targetQ]![prov]!;
+            await _selectHttpSource(
+              targetQ,
+              prov,
+              url,
+              _httpSourceId(targetQ, prov),
+            );
+            return;
+          }
+        }
+      }
+
+      // Fall back to default/Alpha source if stream is broken
+      AppToast.show(
+        context,
+        'Stream connection timed out. Falling back to default server...',
+      );
+      await _fallbackToDefaultSource(resumePosition: _position);
     });
   }
 
@@ -1590,6 +1920,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   Future<void> _onPlaybackCompleted() async {
+    if (widget.isTrailer) {
+      if (mounted) Navigator.of(context).maybePop();
+      return;
+    }
+
     // 1. Remove from watch history since it's fully watched
     final mediaType = widget.isTvShow ? 'tv' : 'movie';
     final idOrTitleOrUrl = (widget.tmdbId != null && widget.tmdbId != 0)
@@ -1601,7 +1936,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (!mounted) return;
 
     // 2. Decide next action: auto-play next episode (series) or go back (movie)
-    if (widget.isTvShow && widget.onEpisodeSelected != null) {
+    if (widget.isTvShow &&
+        widget.onEpisodeSelected != null &&
+        PlayerSettingsService().current.autoPlayNext) {
       await _playNextEpisode(autoPlay: true);
       return;
     }
@@ -1631,98 +1968,161 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   Future<void> _fallbackToDefaultSource({Duration? resumePosition}) async {
-    debugPrint('FALLBACK: opening default source');
+    if (_isFallingBack) {
+      debugPrint('FALLBACK: already falling back, ignoring duplicate call');
+      return;
+    }
+    _isFallingBack = true;
 
-    // Stop any torrent backend just in case
-    _stopCurrentTorrent(erase: true);
+    try {
+      debugPrint('FALLBACK: opening default source');
 
-    final httpSources = _httpSources;
-    final mediaUrl = widget.mediaUrl;
+      // Stop any torrent backend just in case
+      _stopCurrentTorrent(erase: true);
 
-    // Same priority as your _initializePlayer
-    const qPriority = ['1080p', '720p', '480p', '360p', '2160p', '1440p'];
-    const providerPriority = ['Pixeldrain', 'FSL', '10Gbps'];
+      final httpSources = _currentHttpSources;
+      final mediaUrl = widget.mediaUrl;
 
-    // 1) Prefer HTTP (4KHDHub)
-    if (httpSources.isNotEmpty) {
-      String? chosenQuality;
-      for (final q in qPriority) {
-        if (httpSources.containsKey(q)) {
-          chosenQuality = q;
-          break;
+      // 1) First preference: If we have a previously working source that isn't the failed one
+      if (_lastGoodUrl != null &&
+          _lastGoodSourceId != null &&
+          !_failedSourceIds.contains(_lastGoodSourceId) &&
+          _lastGoodSourceId != _selectedSourceId) {
+        debugPrint(
+          'FALLBACK: restoring last known good source ($_lastGoodSourceId)',
+        );
+        await _switchToUrl(
+          url: _lastGoodUrl!,
+          quality: _lastGoodQuality,
+          providerLabel: _lastGoodProviderLabel ?? 'Default',
+          isTorrent: _lastGoodIsTorrent,
+          sourceId: _lastGoodSourceId!,
+          resumePosition: resumePosition,
+        );
+        return;
+      }
+
+      // 2) Search for an unfailed HTTP source using configured priorities
+      final userSettings = PlayerSettingsService().current;
+      final qPriority = userSettings.getQualityPriority();
+      final providerPriority = userSettings.getProviderPriority();
+
+      if (httpSources.isNotEmpty) {
+        String? chosenQuality;
+        String? chosenProvider;
+        String? chosenUrl;
+        String? chosenSourceId;
+
+        for (final q in qPriority) {
+          if (!httpSources.containsKey(q)) continue;
+          final provs = httpSources[q]!;
+          final sortedProvs = provs.keys.toList()
+            ..sort((a, b) {
+              final rankA = _getLanguageRank(a);
+              final rankB = _getLanguageRank(b);
+              if (rankA != rankB) return rankA.compareTo(rankB);
+              final serverA = _cleanProviderLabel(a);
+              final serverB = _cleanProviderLabel(b);
+              for (final p in providerPriority) {
+                final matchA =
+                    (serverA.toLowerCase() == p.toLowerCase()) ||
+                    a.toLowerCase().contains(p.toLowerCase());
+                final matchB =
+                    (serverB.toLowerCase() == p.toLowerCase()) ||
+                    b.toLowerCase().contains(p.toLowerCase());
+                if (matchA && !matchB) return -1;
+                if (matchB && !matchA) return 1;
+              }
+              return a.compareTo(b);
+            });
+
+          for (final prov in sortedProvs) {
+            final sId = _httpSourceId(q, prov);
+            if (!_failedSourceIds.contains(sId) && sId != _selectedSourceId) {
+              chosenQuality = q;
+              chosenProvider = prov;
+              chosenUrl = provs[prov]!;
+              chosenSourceId = sId;
+              break;
+            }
+          }
+          if (chosenUrl != null) break;
+        }
+
+        if (chosenUrl != null &&
+            chosenQuality != null &&
+            chosenProvider != null &&
+            chosenSourceId != null) {
+          await _switchToUrl(
+            url: chosenUrl,
+            quality: chosenQuality,
+            providerLabel: chosenProvider,
+            isTorrent: false,
+            sourceId: chosenSourceId,
+            resumePosition: resumePosition,
+          );
+          return;
         }
       }
-      chosenQuality ??= httpSources.keys.first;
 
-      final provs = httpSources[chosenQuality]!;
-      final sortedProvs = provs.keys.toList()
-        ..sort((a, b) {
-          final rankA = _getLanguageRank(a);
-          final rankB = _getLanguageRank(b);
-          if (rankA != rankB) return rankA.compareTo(rankB);
-          for (final p in providerPriority) {
-            if (a == p && b != p) return -1;
-            if (b == p && a != p) return 1;
-          }
-          return a.compareTo(b);
+      // 3) Fallback to direct mediaUrl if no HTTP map
+      if (mediaUrl != null &&
+          mediaUrl.isNotEmpty &&
+          !_failedSourceIds.contains('direct') &&
+          _selectedSourceId != 'direct') {
+        await _switchToUrl(
+          url: mediaUrl,
+          quality: '1080p',
+          providerLabel: 'Direct',
+          isTorrent: false,
+          sourceId: 'direct',
+          resumePosition: resumePosition,
+        );
+        return;
+      }
+
+      // 4) Nothing left to fallback to
+      debugPrint('FALLBACK: no alternative HTTP/mediaUrl source available.');
+      if (mounted) {
+        setState(() {
+          _isBuffering = false;
+          _isSwitching = false;
         });
-      final chosenProvider = sortedProvs.first;
-
-      final url = provs[chosenProvider]!;
-
-      await _switchToUrl(
-        url: url,
-        quality: chosenQuality,
-        providerLabel: chosenProvider,
-        isTorrent: false,
-        sourceId: _httpSourceId(chosenQuality, chosenProvider),
-        resumePosition: resumePosition,
-      );
-      return;
-    }
-
-    // 2) Fallback to direct mediaUrl if no HTTP map
-    if (mediaUrl != null && mediaUrl.isNotEmpty) {
-      await _switchToUrl(
-        url: mediaUrl,
-        quality: '1080p',
-        providerLabel: 'Direct',
-        isTorrent: false,
-        sourceId: 'direct',
-        resumePosition: resumePosition,
-      );
-      return;
-    }
-
-    // 3) Nothing to fallback to
-    debugPrint('FALLBACK: no default HTTP/mediaUrl source available.');
-    if (mounted) {
-      setState(() {
-        _isBuffering = false;
-        _isSwitching = false;
-      });
-      AppToast.show(
-        context,
-        'No sources available.fallback to default....',
-        icon: Icons.error_rounded,
-        tag: 'no source',
-      );
+        AppToast.show(
+          context,
+          'Unable to play stream. All available sources failed.',
+          icon: Icons.error_rounded,
+          tag: 'no source',
+        );
+      }
+    } catch (e) {
+      debugPrint('Error during fallback: $e');
+    } finally {
+      _isFallingBack = false;
     }
   }
 
   Future<void> _initializePlayer() async {
     if (widget.isOffline && widget.videoUrl != null) {
-      if (Platform.isWindows) {
-        _launchExternalPlayerWindows(widget.videoUrl!, {});
-        return;
-      }
-
       if (mounted) setState(() => _isBuffering = true);
       try {
         await _player.open(
           Media(widget.videoUrl!, start: _currentInitialPosition),
         );
-        await _player.setVolume((_volume * 250.0).clamp(0.0, 350.0));
+        try {
+          _previewPlayer?.open(
+            Media(widget.videoUrl!),
+            play: false,
+          );
+          _previewPlayer?.setVolume(0);
+        } catch (_) {}
+        await _player.setVolume(
+          _isDesktop ? (_volume * 100.0) : ((_volume * 250.0).clamp(0.0, 350.0)),
+        );
+        if (PlayerSettingsService().current.enablePlaybackSpeed &&
+            _playbackRate != 1.0) {
+          await _player.setRate(_playbackRate);
+        }
         _hasOpenedSource = true;
       } catch (e) {
         debugPrint('Offline playback error: $e');
@@ -1734,12 +2134,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final httpSources = _httpSources;
     final torrents = _torrentStreams;
 
-    // ------------ PRIORITY ORDER ------------
-    // Quality priority (4k > 1080P > 720P > 480P > etc.)
-    const qPriority = ['4K', '2160p', '1440p', '1080p', '720p', '480p', '360p'];
-
-    // Provider priority (Pixeldrain must be default)
-    const providerPriority = ['Pixeldrain', 'FSL', '10Gbps'];
+    // Source & Provider priority configured by user in App Settings
+    final userSettings = PlayerSettingsService().current;
+    final qPriority = userSettings.getQualityPriority();
+    final providerPriority = userSettings.getProviderPriority();
     // ----------------------------------------
 
     // ========== 1) HTTP (4KHDHub) has highest priority ==========
@@ -1773,9 +2171,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           final rankA = _getLanguageRank(a);
           final rankB = _getLanguageRank(b);
           if (rankA != rankB) return rankA.compareTo(rankB);
+          final serverA = _cleanProviderLabel(a);
+          final serverB = _cleanProviderLabel(b);
           for (final p in providerPriority) {
-            if (a == p && b != p) return -1;
-            if (b == p && a != p) return 1;
+            final matchA =
+                (serverA.toLowerCase() == p.toLowerCase()) ||
+                a.toLowerCase().contains(p.toLowerCase());
+            final matchB =
+                (serverB.toLowerCase() == p.toLowerCase()) ||
+                b.toLowerCase().contains(p.toLowerCase());
+            if (matchA && !matchB) return -1;
+            if (matchB && !matchA) return 1;
           }
           return a.compareTo(b);
         });
@@ -1898,6 +2304,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     String sourceId,
   ) async {
     if (_isSwitching) return;
+    _failedSourceIds.remove(sourceId);
 
     // 🔴 Use actual player state position to be absolutely sure
     final resumePos = _player.state.position;
@@ -1928,9 +2335,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     }
 
     try {
-      final startUri = Uri.parse(
-        '${EnvConfig.luminoBackendUrl}/start',
-      );
+      final startUri = Uri.parse('${EnvConfig.luminoBackendUrl}/start');
       debugPrint('TORRENT /start → $startUri');
 
       final resp = await http.post(
@@ -2010,6 +2415,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     String sourceId,
   ) async {
     if (_isSwitching) return;
+    _failedSourceIds.remove(sourceId);
 
     // 1. Capture current state BEFORE any modifications
     final resumePos = _player.state.position;
@@ -2046,11 +2452,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     required String url,
     required String providerLabel,
   }) {
-    const chromeUserAgent =
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/124.0.0.0 Safari/537.36';
-
     final lowerUrl = url.toLowerCase();
     final lowerProvider = providerLabel.toLowerCase();
     final isLookMovie =
@@ -2088,32 +2489,79 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       };
     }
 
-    // MovieBox / aoneroom DASH/HLS streams — headers come from httpMetadata
+    // MovieBox / aoneroom / BetaServer DASH/HLS streams — headers come from httpMetadata
     // so we return minimal headers here; the caller merges meta['headers'] on top.
     final isMovieBox =
         lowerUrl.contains('aoneroom.com') ||
         lowerUrl.contains('cloudfront.net') ||
         lowerUrl.contains('akamaized.net') ||
+        lowerUrl.contains('streamguide.cfd') ||
+        lowerProvider.contains('beta') ||
+        lowerProvider.contains('alpha') ||
         lowerUrl.endsWith('.mpd') ||
-        lowerUrl.contains('.mpd?');
+        lowerUrl.contains('.mpd?') ||
+        lowerUrl.endsWith('.m3u8') ||
+        lowerUrl.contains('.m3u8');
     if (isMovieBox) {
-      return const {'User-Agent': chromeUserAgent};
+      return const {'User-Agent': chromeUserAgent, 'Accept': '*/*'};
     }
 
-    return const {'User-Agent': chromeUserAgent};
+    return const {'User-Agent': chromeUserAgent, 'Accept': '*/*'};
   }
 
-  bool _isTransientLookMovieReadError(dynamic err) {
+  bool _isNonFatalError(dynamic err) {
+    final msg = err.toString().toLowerCase();
+    // 1. External subtitles / track files loading errors
+    if (msg.contains('can not open external file') ||
+        msg.contains('cannot open external file') ||
+        (msg.contains('cannot open file') &&
+            (msg.contains('.srt') ||
+                msg.contains('.vtt') ||
+                msg.contains('.ass'))) ||
+        msg.contains('failed to load subtitle') ||
+        msg.contains('error loading subtitle') ||
+        msg.contains('subtitle') ||
+        msg.contains('.srt') ||
+        msg.contains('.vtt') ||
+        msg.contains('.ass') ||
+        msg.contains('sub-file')) {
+      return true;
+    }
+    // 2. Secondary audio track or minor stream warnings that don't prevent video playback
+    if (msg.contains('audio track') && msg.contains('unsupported')) {
+      return true;
+    }
+    return false;
+  }
+
+  bool _isTransientReadError(dynamic err) {
     final message = err.toString().toLowerCase();
-    final provider = (_selectedProviderLabel ?? '').toLowerCase();
-    final isLookMovie = provider.contains('lookmovie');
-    return isLookMovie &&
-        message.contains('ffurl_read returned') &&
-        message.contains('0xffffff76');
+    // Low-level socket read warnings from FFmpeg / TCP / TLS (e.g. ffurl_read returned 0xffffff92,
+    // 0xffffff76, or connection timed out) are transient network read events that FFmpeg's HLS
+    // demuxer and libmpv internally retry and recover from. They must never cancel buffering!
+    if (message.contains('ffurl_read returned') ||
+        message.contains('tcp: ffurl_read') ||
+        message.contains('connection timed out') ||
+        message.contains('operation timed out') ||
+        message.contains('timed out')) {
+      return true;
+    }
+    return false;
   }
 
-  void _launchExternalPlayerWindows(String url, Map<String, String> headers) {
+  Future<void> _launchExternalPlayerWindows(
+    String url,
+    Map<String, String> headers,
+  ) async {
     try {
+      final pSettings = PlayerSettingsService().current;
+      final sSettings = SubtitleSettingsService().current;
+      bool hwDecoding = true;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        hwDecoding = prefs.getBool('lumino_hardware_decoding') ?? true;
+      } catch (_) {}
+
       final payload = {
         'metadata': _currentHttpMetadata,
         'sources': _httpSources,
@@ -2155,6 +2603,36 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           'isOffline': widget.isOffline,
           'initial_position': widget.initialPosition?.inMilliseconds ?? 0,
         },
+        'player_settings': {
+          'preferredQuality': pSettings.preferredQuality,
+          'preferredProvider': pSettings.preferredProvider,
+          'showResizeButton': pSettings.showResizeButton,
+          'enablePlaybackSpeed': pSettings.enablePlaybackSpeed,
+          'defaultPlaybackSpeed': pSettings.defaultPlaybackSpeed,
+          'autoPlayNext': pSettings.autoPlayNext,
+          'showNextEpisodeButton': pSettings.showNextEpisodeButton,
+          'enableEpisodeOverlay': pSettings.enableEpisodeOverlay,
+          'enableDoubleTapSeek': pSettings.enableDoubleTapSeek,
+          'enableDoubleTapPause': pSettings.enableDoubleTapPause,
+          'seekDurationSeconds': pSettings.seekDurationSeconds,
+          'hardwareDecoding': hwDecoding,
+        },
+        'subtitle_settings': {
+          'fontSize': sSettings.fontSize,
+          'textColor':
+              '#${(sSettings.textColor.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}',
+          'isBold': sSettings.isBold,
+          'fontFamily': sSettings.fontFamily,
+          'edgeStyle': sSettings.edgeStyle.name,
+          'edgeColor':
+              '#${(sSettings.edgeColor.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}',
+          'backgroundStyle': sSettings.backgroundStyle.name,
+          'backgroundColor':
+              '#${(sSettings.backgroundColor.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}',
+          'bgOpacity': sSettings.bgOpacity,
+          'bottomPadding': sSettings.bottomPadding,
+          'textAlign': sSettings.textAlign.name,
+        },
       };
       final jsonPayload = jsonEncode(payload);
       final tempDir = Directory.systemTemp;
@@ -2165,17 +2643,101 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
       // Ensure dart:convert is imported. Assuming dart:io is already imported.
       final appDir = p.dirname(Platform.resolvedExecutable);
-      final exePath = p.join(
-        appDir,
-        'ExternalPlayer',
-        'LuminoExternalPlayer.exe',
-      );
+      final candidatePaths = [
+        p.join(appDir, 'ExternalPlayer', 'LuminoExternalPlayer.exe'),
+        p.join(appDir, 'LuminoExternalPlayer.exe'),
+        p.normalize(
+          p.join(
+            appDir,
+            '..',
+            '..',
+            '..',
+            '..',
+            '..',
+            '..',
+            'LuminoExternalPlayer',
+            'bin',
+            'Release',
+            'net10.0-windows',
+            'LuminoExternalPlayer.exe',
+          ),
+        ),
+        p.normalize(
+          p.join(
+            appDir,
+            '..',
+            '..',
+            '..',
+            '..',
+            '..',
+            '..',
+            'LuminoExternalPlayer',
+            'bin',
+            'Debug',
+            'net10.0-windows',
+            'LuminoExternalPlayer.exe',
+          ),
+        ),
+        p.normalize(
+          p.join(
+            Directory.current.path,
+            '..',
+            'LuminoExternalPlayer',
+            'bin',
+            'Release',
+            'net10.0-windows',
+            'LuminoExternalPlayer.exe',
+          ),
+        ),
+        p.normalize(
+          p.join(
+            Directory.current.path,
+            '..',
+            'LuminoExternalPlayer',
+            'bin',
+            'Debug',
+            'net10.0-windows',
+            'LuminoExternalPlayer.exe',
+          ),
+        ),
+        r'E:\PROJECTS\CARRIER PROJECT\FLUTTER_PROJECTS\LuminoExternalPlayer\bin\Release\net10.0-windows\LuminoExternalPlayer.exe',
+        r'E:\PROJECTS\CARRIER PROJECT\FLUTTER_PROJECTS\LuminoExternalPlayer\bin\Debug\net10.0-windows\LuminoExternalPlayer.exe',
+      ];
+
+      String? resolvedExePath;
+      for (final candidate in candidatePaths) {
+        if (File(candidate).existsSync()) {
+          resolvedExePath = candidate;
+          break;
+        }
+      }
+
+      if (resolvedExePath == null) {
+        debugPrint(
+          '[VideoPlayer] External player executable not found in candidate paths: $candidatePaths',
+        );
+        if (mounted) {
+          setState(() {
+            _isExternalPlayerRunning = false;
+          });
+          AppToast.show(
+            context,
+            'External player executable not found.',
+            tag: 'Error',
+          );
+          Navigator.of(context).pop();
+        }
+        return;
+      }
+
       if (mounted) {
         setState(() {
           _isExternalPlayerRunning = true;
         });
       }
-      Process.start(exePath, [file.path]).then((process) async {
+
+      try {
+        final process = await Process.start(resolvedExePath, [file.path]);
         _externalProcess = process;
         await process.exitCode;
         if (mounted) {
@@ -2191,7 +2753,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             final data = jsonDecode(content);
             final pos = data['position'] as int?;
             final dur = data['duration'] as int?;
-            if (pos != null && dur != null && dur > 0) {
+            if (pos != null && dur != null && dur > 0 && !widget.isTrailer) {
               final cw = payload['continue_watch'] as Map<String, dynamic>;
               await WatchHistoryService.saveProgress(
                 id: cw['id'] as int?,
@@ -2227,11 +2789,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             } else if (action == 'play_episode' &&
                 targetSeason != null &&
                 targetEpisode != null) {
-              if (mounted)
+              if (mounted) {
                 _playNextEpisode(
                   specificSeason: targetSeason,
                   specificEpisode: targetEpisode,
                 );
+              }
             } else {
               if (mounted) Navigator.of(context).pop();
             }
@@ -2246,7 +2809,21 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         } else {
           if (mounted) Navigator.of(context).pop();
         }
-      });
+      } catch (e) {
+        debugPrint('Process start error: $e');
+        if (mounted) {
+          setState(() {
+            _isExternalPlayerRunning = false;
+            _externalProcess = null;
+          });
+          AppToast.show(
+            context,
+            'Failed to launch external player: $e',
+            tag: 'Error',
+          );
+          Navigator.of(context).pop();
+        }
+      }
     } catch (e) {
       debugPrint('External player error: $e');
       if (mounted) Navigator.of(context).pop();
@@ -2284,20 +2861,79 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       );
 
       final Map<String, String> headers = {...baseHeaders};
-      final meta = _currentHttpMetadata[sourceId];
+      final meta =
+          _currentHttpMetadata[sourceId] ?? _currentHttpMetadata['direct'];
       if (meta != null && meta is Map && meta['headers'] != null) {
         headers.addAll(Map<String, String>.from(meta['headers']));
+      } else if (_currentHttpMetadata['headers'] != null &&
+          _currentHttpMetadata['headers'] is Map) {
+        headers.addAll(
+          Map<String, String>.from(_currentHttpMetadata['headers'] as Map),
+        );
       }
-
-      if (Platform.isWindows) {
-        _launchExternalPlayerWindows(url, headers);
-        return;
-      }
-
-      await _player.open(
-        Media(url, httpHeaders: headers, start: resumePosition),
+      final bool hasUa = headers.keys.any(
+        (k) => k.toLowerCase() == 'user-agent',
       );
-      await _player.setVolume((_volume * 150.0).clamp(0.0, 150.0));
+      if (!hasUa) {
+        headers['User-Agent'] = chromeUserAgent;
+      }
+
+      try {
+        final p = (_player.platform as dynamic);
+        await p?.setProperty('cache', 'yes');
+        await p?.setProperty('demuxer-readahead-secs', '180');
+        await p?.setProperty('cache-secs', '180');
+        await p?.setProperty('cache-pause', 'yes');
+        await p?.setProperty('cache-pause-wait', '3');
+        await p?.setProperty(
+          'demuxer-max-bytes',
+          (256 * 1024 * 1024).toString(),
+        );
+        await p?.setProperty(
+          'demuxer-max-back-bytes',
+          (64 * 1024 * 1024).toString(),
+        );
+        await p?.setProperty('demuxer-lavf-buffersize', '2097152');
+        await p?.setProperty('stream-buffer-size', '4194304');
+        // Ensure FFmpeg HLS demuxer accepts extensionless fMP4 segments and avoids persistent connection stalls
+        await p?.setProperty(
+          'demuxer-lavf-o',
+          'allowed_extensions=ALL,allowed_segment_extensions=ALL,extension_picky=0,seg_max_retry=10,buffer_size=4194304,tcp_nodelay=1,http_persistent=0',
+        );
+        await p?.setProperty(
+          'stream-lavf-o',
+          'reconnect=1,reconnect_streamed=1,reconnect_delay_max=5,reconnect_on_network_error=1,reconnect_on_http_error=4xx,5xx,buffer_size=4194304',
+        );
+        await p?.setProperty('network-timeout', '60');
+        await p?.setProperty('vd-lavc-threads', '4');
+      } catch (e) {
+        debugPrint('Error configuring demuxer properties: $e');
+      }
+
+      try {
+        await _player.open(
+          Media(url, httpHeaders: headers, start: resumePosition),
+        );
+      } catch (openErr) {
+        debugPrint('Failed to open url ($url): $openErr');
+        rethrow;
+      }
+      try {
+        _previewPlayer?.open(
+          Media(url, httpHeaders: headers),
+          play: false,
+        );
+        _previewPlayer?.setVolume(0);
+      } catch (e) {
+        debugPrint('Failed to open preview player: $e');
+      }
+      await _player.setVolume(
+        _isDesktop ? (_volume * 100.0) : ((_volume * 150.0).clamp(0.0, 150.0)),
+      );
+      if (PlayerSettingsService().current.enablePlaybackSpeed &&
+          _playbackRate != 1.0) {
+        await _player.setRate(_playbackRate);
+      }
       _hasOpenedSource = true;
 
       // ✅ Only now (after open/seek start) we mark this as last good source
@@ -2305,6 +2941,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _lastGoodQuality = quality;
       _lastGoodProviderLabel = providerLabel;
       _lastGoodIsTorrent = isTorrent;
+      _lastGoodSourceId = sourceId;
       _selectedSourceId = sourceId;
 
       setState(() {
@@ -2366,8 +3003,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (id == SubtitleTrack.auto().id || id == SubtitleTrack.no().id)
         continue;
       subsSeenIds.add(id);
-      // USER REQUEST: Only show subtitles from /links (external).
-      // We intentionally skip adding embedded `t` to `subs` so they don't clutter the UI.
+      subs.add(t);
     }
 
     final combinedSubs = [...subs];
@@ -2400,18 +3036,38 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (selectedSubIndex == -1) selectedSubIndex = null;
     }
 
+    // Check sticky subtitle preference first if available
+    if (_stickySubtitle != null) {
+      if (_stickySubtitle!.id == SubtitleTrack.no().id) {
+        selectedSubIndex = -1;
+      } else {
+        final stickyIdx = combinedSubs.indexWhere(
+          (s) =>
+              s.id == _stickySubtitle!.id ||
+              (s.title != null && s.title == _stickySubtitle!.title),
+        );
+        if (stickyIdx != -1) {
+          selectedSubIndex = stickyIdx;
+        }
+      }
+    }
+
     // Auto-select English if nothing selected
-    if (selectedSubIndex == null || selectedSubIndex == -1) {
+    if (selectedSubIndex == null) {
       final englishIndex = combinedSubs.indexWhere(
-        (s) => (s.title?.toLowerCase().contains('english') ?? false),
+        (s) =>
+            ((s.title?.toLowerCase().contains('english') ?? false) ||
+                (s.language?.toLowerCase() == 'eng' ||
+                    s.language?.toLowerCase() == 'en')),
       );
       if (englishIndex != -1) {
         selectedSubIndex = englishIndex;
         // Actually apply to player
         _player.setSubtitleTrack(combinedSubs[englishIndex]);
+      } else {
+        selectedSubIndex = -1;
       }
     }
-    selectedSubIndex ??= combinedSubs.isNotEmpty ? 0 : -1;
 
     final isPrimebox = _selectedProviderLabel == 'Primebox';
     final hasExternalDubs =
@@ -2436,12 +3092,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
     if (matchingProvs.length > 1) {
       // 1. HTTP Multi-Audio Streams (Original Audio, Telugu Audio, Hindi Audio, etc.)
-      // Exclude embedded container audio track to avoid duplicate / phantom "hin"/"und" tracks.
       for (int i = 0; i < matchingProvs.length; i++) {
         final p = matchingProvs[i];
         final lang = _getLanguageFromProvider(p);
         final streamAudioIndex = 2000 + i;
-        audioMap[streamAudioIndex] = '$lang Audio';
+        audioMap[streamAudioIndex] = _normalizeAudioTrackTitle(
+          title: lang,
+          language: p,
+          trackNumber: i + 1,
+        );
 
         if (_selectedProviderLabel == p && _activeExternalDubSid == null) {
           resolvedAudioIndex = streamAudioIndex;
@@ -2453,16 +3112,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       for (int i = 0; i < widget.externalDubs!.length; i++) {
         final dub = widget.externalDubs![i];
         final name = dub['lanName'] ?? 'Dub ${i + 1}';
-        final lowerName = name.toLowerCase();
         final externalIndex = 1000 + i;
-        audioMap[externalIndex] = name.toLowerCase().contains('audio')
-            ? name
-            : '$name Audio';
+        audioMap[externalIndex] = _normalizeAudioTrackTitle(
+          title: name,
+          language: dub['lanCode'] ?? dub['language'],
+          trackNumber: i + 1,
+        );
 
         final activeSid = _activeExternalDubSid;
         if (activeSid != null) {
           if (activeSid == dub['subjectId']) resolvedAudioIndex = externalIndex;
-        } else if (lowerName.contains('original')) {
+        } else if (name.toLowerCase().contains('original')) {
           resolvedAudioIndex = externalIndex;
         }
       }
@@ -2470,10 +3130,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     } else {
       // 3. Embedded media_kit container tracks
       for (int i = 0; i < audios.length; i++) {
-        audioMap[i] = _buildTrackLabel(
-          audios[i].title,
-          audios[i].language,
-          fallback: 'Audio ${i + 1}',
+        audioMap[i] = _normalizeAudioTrackTitle(
+          title: audios[i].title,
+          language: audios[i].language,
+          trackNumber: i + 1,
         );
       }
       resolvedAudioIndex = audios.indexWhere(
@@ -2483,25 +3143,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         resolvedAudioIndex = audios.isNotEmpty ? 0 : null;
     }
 
+    final finalAudioMap = _deduplicateAudioLabels(audioMap);
+    final subMap = _buildSubtitleMap(combinedSubs);
+
     setState(() {
       _audioTrackObjs = audios;
       _subtitleTrackObjs = combinedSubs;
 
-      _audioTracks = audioMap;
+      _audioTracks = finalAudioMap;
       _selectedAudioTrack = resolvedAudioIndex;
 
-      _subtitleTracks = {
-        for (int i = 0; i < combinedSubs.length; i++)
-          i:
-              (combinedSubs[i].title != null &&
-                  combinedSubs[i].title!.trim().isNotEmpty)
-              ? combinedSubs[i].title!.trim()
-              : _buildTrackLabel(
-                  null,
-                  combinedSubs[i].language,
-                  fallback: 'Subtitle ${i + 1}',
-                ),
-      };
+      _subtitleTracks = subMap;
 
       _selectedSubtitleTrack = selectedSubIndex;
       _tracksLoaded = true;
@@ -2556,6 +3208,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         debugPrint('Error pausing for tracks panel: $e');
       }
     }
+    _updateTracksFromState(_player.state.tracks);
     _pendingAudioTrack = _selectedAudioTrack;
     _pendingSubtitleTrack = _selectedSubtitleTrack;
     if (mounted) {
@@ -2822,6 +3475,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _setNativePipEnabled(false);
     _saveCurrentProgress(); // Final save
     _historyTimer?.cancel();
     _hideControlsTimer?.cancel();
@@ -2904,6 +3559,31 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     });
   }
 
+  void _seekPreview(double sec) {
+    final maxSec = _duration.inSeconds.toDouble();
+    if (maxSec <= 0) return;
+    final clampedSec = sec.clamp(0.0, maxSec);
+    final seekPos = Duration(milliseconds: (clampedSec * 1000).toInt());
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    _seekDebounceTimer?.cancel();
+    if (now - _lastSeekTime > 120) {
+      _lastSeekTime = now;
+      try {
+        _previewPlayer?.seek(seekPos);
+      } catch (_) {}
+    } else {
+      _seekDebounceTimer = Timer(const Duration(milliseconds: 120), () {
+        if (_isScrubbing || (_isDesktop && _isHoveringSlider)) {
+          _lastSeekTime = DateTime.now().millisecondsSinceEpoch;
+          try {
+            _previewPlayer?.seek(seekPos);
+          } catch (_) {}
+        }
+      });
+    }
+  }
+
   Future<bool> _waitForStreamReady(String url) async {
     final uri = Uri.parse(url);
 
@@ -2984,13 +3664,66 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                         if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
                           _seekBy(const Duration(seconds: -10));
                         }
+                        if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+                          final newVol = (_volume + 0.05).clamp(0.0, 1.0);
+                          setState(() {
+                            _volume = newVol;
+                            if (newVol > 0.0) _lastUnmutedVolume = newVol;
+                          });
+                          _player.setVolume(newVol * 100.0);
+                          if (mounted) {
+                            AppToast.show(
+                              context,
+                              'Volume: ${(newVol * 100).round()}%',
+                            );
+                          }
+                        }
+                        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                          final newVol = (_volume - 0.05).clamp(0.0, 1.0);
+                          setState(() {
+                            _volume = newVol;
+                            if (newVol > 0.0) _lastUnmutedVolume = newVol;
+                          });
+                          _player.setVolume(newVol * 100.0);
+                          if (mounted) {
+                            AppToast.show(
+                              context,
+                              'Volume: ${(newVol * 100).round()}%',
+                            );
+                          }
+                        }
+                        if (event.logicalKey == LogicalKeyboardKey.keyM) {
+                          if (_volume > 0.001) {
+                            _lastUnmutedVolume = _volume;
+                            setState(() => _volume = 0.0);
+                            _player.setVolume(0.0);
+                            if (mounted) {
+                              AppToast.show(context, 'Muted');
+                            }
+                          } else {
+                            final restoreVol =
+                                _lastUnmutedVolume > 0.05 ? _lastUnmutedVolume : 1.0;
+                            setState(() => _volume = restoreVol);
+                            _player.setVolume(restoreVol * 100.0);
+                            if (mounted) {
+                              AppToast.show(
+                                context,
+                                'Volume: ${(restoreVol * 100).round()}%',
+                              );
+                            }
+                          }
+                        }
                         if (event.logicalKey == LogicalKeyboardKey.keyR) {
                           //videoboxfit
                           _cycleResizeMode();
                         }
-                        //enter fullscreen
+                        //toggle fullscreen
                         if (event.logicalKey == LogicalKeyboardKey.keyF) {
-                          await _enterWindowFullscreen();
+                          if (isfullscreen) {
+                            await _exitWindowFullscreen();
+                          } else {
+                            await _enterWindowFullscreen();
+                          }
                         }
                         if (event.logicalKey == LogicalKeyboardKey.keyQ) {
                           _openQualityPanel();
@@ -3058,30 +3791,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                               child: AnimatedOpacity(
                                 duration: const Duration(milliseconds: 400),
                                 opacity: _isSwitching ? 0.0 : 1.0,
-                                child: Video(
-                                  key: ValueKey('player_$_playerKey'),
-                                  controller: _videoController,
-                                  controls: NoVideoControls,
-                                  fit: _videoBoxFit,
-                                  subtitleViewConfiguration:
-                                      SubtitleViewConfiguration(
-                                        style: const TextStyle(
-                                          fontSize: 19.5,
-                                          height: 1.3,
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.normal,
-                                        ),
-                                        textScaler: const TextScaler.linear(
-                                          1.0,
-                                        ),
-                                        textAlign: TextAlign.center,
-                                        padding: const EdgeInsets.fromLTRB(
-                                          16.0,
-                                          0.0,
-                                          16.0,
-                                          35.0,
-                                        ),
-                                      ),
+                                child: ValueListenableBuilder<SubtitleSettings>(
+                                  valueListenable: SubtitleSettingsService()
+                                      .settingsNotifier,
+                                  builder: (context, subSettings, _) {
+                                    return Video(
+                                      key: ValueKey('player_$_playerKey'),
+                                      controller: _videoController,
+                                      controls: NoVideoControls,
+                                      fit: _videoBoxFit,
+                                      subtitleViewConfiguration: subSettings
+                                          .toSubtitleViewConfiguration(),
+                                    );
+                                  },
                                 ),
                               ),
                             ),
@@ -3090,7 +3812,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                             if (!_isPlaying &&
                                 !_showControls &&
                                 _hasOpenedSource &&
-                                !_isSwitching)
+                                !_isSwitching &&
+                                _position > Duration.zero)
                               Positioned.fill(
                                 child: _buildPausedMetadataOverlay(),
                               ),
@@ -3171,21 +3894,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                 ),
                               ),
 
-                            // Dynamic brightness visual overlay
-                            if (_brightness < 1.0)
-                              Positioned.fill(
-                                child: IgnorePointer(
-                                  child: Container(
-                                    color: Colors.black.withValues(
-                                      alpha: ((1.0 - _brightness) * 0.75).clamp(
-                                        0.0,
-                                        0.85,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-
                             Positioned.fill(
                               child: LayoutBuilder(
                                 builder: (context, constraints) {
@@ -3206,18 +3914,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                     onDoubleTapDown: (details) =>
                                         _onDoubleTapDown(details, constraints),
                                     onDoubleTap: () {},
-                                    onVerticalDragStart: (details) =>
-                                        _onVerticalDragStart(
-                                          details,
-                                          constraints,
-                                        ),
-                                    onVerticalDragUpdate: (details) =>
-                                        _onVerticalDragUpdate(
-                                          details,
-                                          constraints,
-                                        ),
-                                    onVerticalDragEnd: _onVerticalDragEnd,
-                                    onVerticalDragCancel: _onVerticalDragCancel,
+                                    onVerticalDragStart: _isDesktop
+                                        ? null
+                                        : (details) => _onVerticalDragStart(
+                                              details,
+                                              constraints,
+                                            ),
+                                    onVerticalDragUpdate: _isDesktop
+                                        ? null
+                                        : (details) => _onVerticalDragUpdate(
+                                              details,
+                                              constraints,
+                                            ),
+                                    onVerticalDragEnd:
+                                        _isDesktop ? null : _onVerticalDragEnd,
+                                    onVerticalDragCancel:
+                                        _isDesktop ? null : _onVerticalDragCancel,
                                     child: const SizedBox.expand(),
                                   );
                                 },
@@ -3232,129 +3944,363 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                 !_showQualityPanel) ...[
                               // Top bar
                               Positioned(
-                                left: 30,
-                                right: 30,
-                                top: 8,
+                                left: _isDesktop ? 20 : 30,
+                                right: _isDesktop ? 20 : 30,
+                                top: _isDesktop ? 10 : 8,
                                 child: Row(
                                   children: [
-                                    if (defaultTargetPlatform ==
-                                        TargetPlatform.windows)
+                                    if (_isDesktop)
                                       Padding(
                                         padding: const EdgeInsets.only(
-                                          right: 15,
+                                          right: 12,
                                         ),
-                                        child: IconButton(
+                                        child: _DesktopTopIconButton(
                                           icon: const HugeIcon(
                                             icon: HugeIcons
                                                 .strokeRoundedArrowLeft01,
                                             color: Colors.white,
-                                            size: 28,
+                                            size: 19,
                                           ),
-                                          onPressed: () async {
+                                          tooltip: 'Back',
+                                          onTap: () async {
                                             await _saveCurrentProgress();
-                                            if (mounted)
+                                            if (mounted) {
                                               Navigator.of(context).pop();
+                                            }
                                           },
                                         ),
+                                      )
+                                    else if (defaultTargetPlatform ==
+                                        TargetPlatform.windows)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          right: 12,
+                                        ),
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            borderRadius:
+                                                BorderRadius.circular(18),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black
+                                                    .withValues(alpha: 0.25),
+                                                blurRadius: 8,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ],
+                                          ),
+                                          child: ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(18),
+                                            child: BackdropFilter(
+                                              filter: ImageFilter.blur(
+                                                sigmaX: 16,
+                                                sigmaY: 16,
+                                              ),
+                                              child: Container(
+                                                width: 34,
+                                                height: 34,
+                                                decoration: BoxDecoration(
+                                                  gradient: LinearGradient(
+                                                    begin: Alignment.topLeft,
+                                                    end: Alignment.bottomRight,
+                                                    colors: [
+                                                      Colors.white
+                                                          .withValues(alpha: 0.16),
+                                                      Colors.white
+                                                          .withValues(alpha: 0.05),
+                                                    ],
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(18),
+                                                  border: Border.all(
+                                                    color: Colors.white
+                                                        .withValues(alpha: 0.28),
+                                                    width: 1.0,
+                                                  ),
+                                                ),
+                                                child: IconButton(
+                                                  padding: EdgeInsets.zero,
+                                                  icon: const HugeIcon(
+                                                    icon: HugeIcons
+                                                        .strokeRoundedArrowLeft01,
+                                                    color: Colors.white,
+                                                    size: 20,
+                                                  ),
+                                                  onPressed: () async {
+                                                    await _saveCurrentProgress();
+                                                    if (mounted) {
+                                                      Navigator.of(context).pop();
+                                                    }
+                                                  },
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
                                       ),
-                                    // Inside your Row children:
+                                    // Title & Subtitle
                                     Expanded(
-                                      // 1. Wrap the Column in Expanded (to fix WIDTH issues in the Row)
                                       child: Column(
-                                        mainAxisSize: MainAxisSize
-                                            .min, // 2. Tell Column to shrink-wrap vertically
-                                        crossAxisAlignment: CrossAxisAlignment
-                                            .start, // Align text to the left
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
-                                          SizedBox(height: 10),
                                           Text(
-                                            // 3. Removed 'Expanded' around the Text
                                             _videoTitle,
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: const TextStyle(
                                               fontWeight: FontWeight.w600,
-                                              fontSize: 17.5,
+                                              fontSize: 16.0,
                                             ),
                                           ),
-                                          const SizedBox(
-                                            height: 4,
-                                          ), // Optional: Add a little spacing
-                                          Text(
-                                            // 3. Removed 'Expanded' around the Text
-                                            _videoSubtitle,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                              fontSize:
-                                                  13, // You might want this smaller, e.g., 12
-                                              color: Colors
-                                                  .grey, // Optional: Distinguish subtitle
+                                          if (_videoSubtitle.isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              _videoSubtitle,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w500,
+                                                fontSize: 12.0,
+                                                color: Colors.grey.shade400,
+                                              ),
                                             ),
-                                          ),
+                                          ],
                                         ],
                                       ),
                                     ),
-                                    if (_hasAnyQualityOptions)
-                                      IconButton(
-                                        tooltip: 'Quality',
-                                        onPressed: _isSwitching
-                                            ? null
-                                            : _openQualityPanel,
-                                        icon: const HugeIcon(
-                                          icon:
-                                              HugeIcons.strokeRoundedSettings03,
-                                          color: Colors.white,
-                                          size: 30,
+                                    if (_isDesktop) ...[
+                                      // Desktop Text + Icon Combo Controls
+                                      if (_hasAnyQualityOptions) ...[
+                                        const SizedBox(width: 8),
+                                        _DesktopTopComboButton(
+                                          icon: const HugeIcon(
+                                            icon: HugeIcons
+                                                .strokeRoundedSettings03,
+                                            color: Colors.white,
+                                            size: 18,
+                                          ),
+                                          label: (_selectedQuality.isNotEmpty &&
+                                                  _selectedQuality
+                                                          .toLowerCase() !=
+                                                      'auto')
+                                              ? _selectedQuality
+                                              : 'Quality',
+                                          tooltip: _selectedQuality.isNotEmpty
+                                              ? 'Video Quality ($_selectedQuality)'
+                                              : 'Video Quality',
+                                          onTap: _isSwitching
+                                              ? null
+                                              : _openQualityPanel,
                                         ),
+                                      ],
+                                      const SizedBox(width: 8),
+                                      _DesktopTopComboButton(
+                                        icon: const HugeIcon(
+                                          icon: HugeIcons
+                                              .strokeRoundedMusicNote01,
+                                          color: Colors.white,
+                                          size: 18,
+                                        ),
+                                        label: 'Audio & Subs',
+                                        tooltip: 'Audio & Subtitle Tracks',
+                                        onTap: _isSwitching
+                                            ? null
+                                            : _openTracksPanel,
                                       ),
-                                    IconButton(
-                                      tooltip: 'Tracks',
-                                      onPressed: _isSwitching
-                                          ? null
-                                          : _openTracksPanel,
-                                      icon: const HugeIcon(
-                                        icon:
-                                            HugeIcons.strokeRoundedMusicNote01,
-                                        color: Colors.white,
-                                        size: 29,
+                                      if (PlayerSettingsService()
+                                          .current
+                                          .enablePlaybackSpeed) ...[
+                                        const SizedBox(width: 8),
+                                        _DesktopTopComboButton(
+                                          icon: const Icon(
+                                            Icons.speed_rounded,
+                                            color: Colors.white,
+                                            size: 18,
+                                          ),
+                                          label: '${_playbackRate}x',
+                                          tooltip:
+                                              'Playback Speed (${_playbackRate}x)',
+                                          onTap: _isSwitching
+                                              ? null
+                                              : _openSpeedDialog,
+                                        ),
+                                      ],
+                                      if (PlayerSettingsService()
+                                          .current
+                                          .showResizeButton) ...[
+                                        const SizedBox(width: 8),
+                                        _DesktopTopComboButton(
+                                          icon: const HugeIcon(
+                                            icon: HugeIcons
+                                                .strokeRoundedResizeFieldRectangle,
+                                            color: Colors.white,
+                                            size: 18,
+                                          ),
+                                          label: _resizeLabel,
+                                          tooltip:
+                                              'Aspect Ratio: $_resizeLabel',
+                                          onTap: _isSwitching
+                                              ? null
+                                              : _cycleResizeMode,
+                                        ),
+                                      ],
+                                      const SizedBox(width: 8),
+                                      _DesktopTopIconButton(
+                                        icon: Icon(
+                                          _volume <= 0.001
+                                              ? Icons.volume_off_rounded
+                                              : (_volume < 0.5
+                                                  ? Icons.volume_down_rounded
+                                                  : Icons.volume_up_rounded),
+                                          color: Colors.white,
+                                          size: 19,
+                                        ),
+                                        tooltip: _volume <= 0.001
+                                            ? 'Unmute (M)'
+                                            : 'Mute (M) - ${(_volume * 100).round()}%',
+                                        onTap: () {
+                                          if (_volume > 0.001) {
+                                            _lastUnmutedVolume = _volume;
+                                            setState(() => _volume = 0.0);
+                                            _player.setVolume(0.0);
+                                          } else {
+                                            final restoreVol =
+                                                _lastUnmutedVolume > 0.05
+                                                    ? _lastUnmutedVolume
+                                                    : 1.0;
+                                            setState(
+                                                () => _volume = restoreVol);
+                                            _player.setVolume(
+                                                restoreVol * 100.0);
+                                          }
+                                        },
                                       ),
-                                    ),
-                                    // --- NEW: resize button, cycles Default / Zoom / Stretch ---
-                                    IconButton(
-                                      tooltip: 'Resize: $_resizeLabel',
-                                      onPressed: _isSwitching
-                                          ? null
-                                          : _cycleResizeMode,
-                                      icon: const HugeIcon(
-                                        icon: HugeIcons
-                                            .strokeRoundedResizeFieldRectangle,
-                                        color: Colors.white,
-                                        size: 30,
-                                      ),
-                                    ),
-                                    // --- NEW: fullscreen button if desktop ---
-                                    if (_isDesktop)
-                                      IconButton(
-                                        tooltip: 'Fullscreen',
-                                        onPressed: isfullscreen
-                                            ? _exitWindowFullscreen
-                                            : _enterWindowFullscreen,
+                                      const SizedBox(width: 8),
+                                      _DesktopTopIconButton(
                                         icon: isfullscreen
                                             ? const HugeIcon(
                                                 icon: HugeIcons
                                                     .strokeRoundedMinimizeScreen,
                                                 color: Colors.white,
-                                                size: 28,
+                                                size: 19,
                                               )
                                             : const HugeIcon(
                                                 icon: HugeIcons
                                                     .strokeRoundedMaximizeScreen,
                                                 color: Colors.white,
-                                                size: 28,
+                                                size: 19,
                                               ),
+                                        tooltip: isfullscreen
+                                            ? 'Exit Fullscreen (F / Esc)'
+                                            : 'Fullscreen (F)',
+                                        onTap: isfullscreen
+                                            ? _exitWindowFullscreen
+                                            : _enterWindowFullscreen,
                                       ),
+                                    ] else ...[
+                                      // Mobile / Compact Controls inside a Frosted Glass Capsule
+                                      ClipRRect(
+                                        borderRadius:
+                                            BorderRadius.circular(20),
+                                        child: BackdropFilter(
+                                          filter: ImageFilter.blur(
+                                            sigmaX: 16,
+                                            sigmaY: 16,
+                                          ),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              gradient: LinearGradient(
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                                colors: [
+                                                  Colors.white
+                                                      .withValues(alpha: 0.16),
+                                                  Colors.white
+                                                      .withValues(alpha: 0.05),
+                                                ],
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              border: Border.all(
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.28),
+                                                width: 1.0,
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (_hasAnyQualityOptions)
+                                                  IconButton(
+                                                    tooltip: 'Quality',
+                                                    onPressed: _isSwitching
+                                                        ? null
+                                                        : _openQualityPanel,
+                                                    icon: const HugeIcon(
+                                                      icon: HugeIcons
+                                                          .strokeRoundedSettings03,
+                                                      color: Colors.white,
+                                                      size: 24,
+                                                    ),
+                                                  ),
+                                                IconButton(
+                                                  tooltip: 'Tracks',
+                                                  onPressed: _isSwitching
+                                                      ? null
+                                                      : _openTracksPanel,
+                                                  icon: const HugeIcon(
+                                                    icon: HugeIcons
+                                                        .strokeRoundedMusicNote01,
+                                                    color: Colors.white,
+                                                    size: 24,
+                                                  ),
+                                                ),
+                                                // --- Playback Speed button ---
+                                                if (PlayerSettingsService()
+                                                    .current
+                                                    .enablePlaybackSpeed)
+                                                  IconButton(
+                                                    tooltip:
+                                                        'Speed (${_playbackRate}x)',
+                                                    onPressed: _isSwitching
+                                                        ? null
+                                                        : _openSpeedDialog,
+                                                    icon: const Icon(
+                                                      Icons.speed_rounded,
+                                                      color: Colors.white,
+                                                      size: 22,
+                                                    ),
+                                                  ),
+                                                // --- Resize button, cycles Default / Zoom / Stretch ---
+                                                if (PlayerSettingsService()
+                                                    .current
+                                                    .showResizeButton)
+                                                  IconButton(
+                                                    tooltip:
+                                                        'Resize: $_resizeLabel',
+                                                    onPressed: _isSwitching
+                                                        ? null
+                                                        : _cycleResizeMode,
+                                                    icon: const HugeIcon(
+                                                      icon: HugeIcons
+                                                          .strokeRoundedResizeFieldRectangle,
+                                                      color: Colors.white,
+                                                      size: 24,
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),
@@ -3366,10 +4312,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                   children: [
                                     SeekCircleButton(
                                       isForward: false,
+                                      seconds: PlayerSettingsService()
+                                          .current
+                                          .seekDurationSeconds,
                                       onTap: _isSwitching
                                           ? null
                                           : () => _seekBy(
-                                              const Duration(seconds: -10),
+                                              Duration(
+                                                seconds:
+                                                    -PlayerSettingsService()
+                                                        .current
+                                                        .seekDurationSeconds,
+                                              ),
                                             ),
                                     ),
                                     const SizedBox(width: 50),
@@ -3390,10 +4344,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                     const SizedBox(width: 50),
                                     SeekCircleButton(
                                       isForward: true,
+                                      seconds: PlayerSettingsService()
+                                          .current
+                                          .seekDurationSeconds,
                                       onTap: _isSwitching
                                           ? null
                                           : () => _seekBy(
-                                              const Duration(seconds: 10),
+                                              Duration(
+                                                seconds: PlayerSettingsService()
+                                                    .current
+                                                    .seekDurationSeconds,
+                                              ),
                                             ),
                                     ),
                                   ],
@@ -3425,7 +4386,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
                               // --- NEW: Next Episode Button Overlay ---
                               if (widget.isTvShow &&
-                                  widget.onEpisodeSelected != null)
+                                  widget.onEpisodeSelected != null &&
+                                  PlayerSettingsService()
+                                      .current
+                                      .showNextEpisodeButton)
                                 Positioned(
                                   right: 30,
                                   bottom: 90, // just above the slider
@@ -3556,12 +4520,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                                     (trackWidth -
                                                         sliderPadding * 2);
 
-                                            // Calculate the dynamic width of our preview bubble
+                                            // Calculate the dynamic width of our preview bubble (16:9 ratio)
                                             final double bubbleWidth =
-                                                (_previewThumbnail != null ||
-                                                    _previewController != null)
-                                                ? (_isDesktop ? 250.0 : 140.0)
-                                                : 90.0;
+                                                _isDesktop ? 240.0 : 144.0;
+                                            final double bubbleHeight =
+                                                _isDesktop ? 135.0 : 81.0;
                                             // NEW: compute buffered fraction
                                             final bufferedSec = _buffered
                                                 .inSeconds
@@ -3618,41 +4581,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                                       setState(() {
                                                         _hoverValue = v;
                                                       });
-
-                                                      final now = DateTime.now()
-                                                          .millisecondsSinceEpoch;
-                                                      final seekPos = Duration(
-                                                        milliseconds: (v * 1000)
-                                                            .toInt(),
-                                                      );
-
-                                                      _seekDebounceTimer
-                                                          ?.cancel();
-                                                      if (now - _lastSeekTime >
-                                                          250) {
-                                                        _lastSeekTime = now;
-                                                        _previewPlayer?.seek(
-                                                          seekPos,
-                                                        );
-                                                      } else {
-                                                        _seekDebounceTimer = Timer(
-                                                          const Duration(
-                                                            milliseconds: 250,
-                                                          ),
-                                                          () {
-                                                            if (_isHoveringSlider &&
-                                                                !_isScrubbing) {
-                                                              _lastSeekTime =
-                                                                  DateTime.now()
-                                                                      .millisecondsSinceEpoch;
-                                                              _previewPlayer
-                                                                  ?.seek(
-                                                                    seekPos,
-                                                                  );
-                                                            }
-                                                          },
-                                                        );
-                                                      }
+                                                      _seekPreview(v);
                                                     },
                                                     child: Slider(
                                                       min: 0.0,
@@ -3682,6 +4611,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                                         _scheduleThumbnailRequest(
                                                           v,
                                                         );
+                                                        _seekPreview(v);
                                                       },
                                                       onChanged: _isSwitching
                                                           ? null
@@ -3697,48 +4627,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                                               _scheduleThumbnailRequest(
                                                                 v,
                                                               );
-
-                                                              final now =
-                                                                  DateTime.now()
-                                                                      .millisecondsSinceEpoch;
-                                                              final seekPos = Duration(
-                                                                milliseconds:
-                                                                    (v * 1000)
-                                                                        .toInt(),
-                                                              );
-
-                                                              _seekDebounceTimer
-                                                                  ?.cancel();
-                                                              if (now -
-                                                                      _lastSeekTime >
-                                                                  250) {
-                                                                _lastSeekTime =
-                                                                    now;
-                                                                if (_isScrubbing) {
-                                                                  _previewPlayer
-                                                                      ?.seek(
-                                                                        seekPos,
-                                                                      );
-                                                                }
-                                                              } else {
-                                                                _seekDebounceTimer = Timer(
-                                                                  const Duration(
-                                                                    milliseconds:
-                                                                        250,
-                                                                  ),
-                                                                  () {
-                                                                    if (_isScrubbing) {
-                                                                      _lastSeekTime =
-                                                                          DateTime.now()
-                                                                              .millisecondsSinceEpoch;
-                                                                      _previewPlayer
-                                                                          ?.seek(
-                                                                            seekPos,
-                                                                          );
-                                                                    }
-                                                                  },
-                                                                );
-                                                              }
+                                                              _seekPreview(v);
                                                             },
                                                       onChangeEnd: (v) async {
                                                         if (!_isSwitching &&
@@ -3772,120 +4661,48 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                                     ),
                                                   ),
                                                 ),
-                                                // --- NEW: beautifully modern preview bubble above thumb ---
+                                                // --- Live Video & Timestamp Preview Bubble above slider thumb ---
                                                 if (_isScrubbing ||
                                                     (_isDesktop &&
                                                         _isHoveringSlider))
                                                   Positioned(
-                                                    bottom: 45, // above slider
-                                                    left:
-                                                        (previewCenterX -
-                                                                (bubbleWidth /
-                                                                    2))
-                                                            .clamp(
-                                                              16.0,
-                                                              trackWidth -
-                                                                  bubbleWidth -
-                                                                  16.0,
-                                                            ),
+                                                    bottom: 48, // above slider
+                                                    left: () {
+                                                      final maxLeft =
+                                                          trackWidth -
+                                                          bubbleWidth -
+                                                          16.0;
+                                                      final clampMax =
+                                                          maxLeft < 16.0
+                                                              ? 16.0
+                                                              : maxLeft;
+                                                      return (previewCenterX -
+                                                              (bubbleWidth /
+                                                                  2))
+                                                          .clamp(16.0, clampMax);
+                                                    }(),
                                                     child: Column(
                                                       mainAxisSize:
                                                           MainAxisSize.min,
                                                       children: [
-                                                        if (_previewThumbnail !=
-                                                                null ||
-                                                            _previewController !=
-                                                                null) ...[
-                                                          Container(
-                                                            width: _isDesktop
-                                                                ? 250
-                                                                : 140,
-                                                            height: _isDesktop
-                                                                ? 160
-                                                                : 80,
-                                                            decoration: BoxDecoration(
-                                                              color:
-                                                                  const Color(
-                                                                    0xFF1A1D24,
-                                                                  ),
-                                                              borderRadius:
-                                                                  BorderRadius.circular(
-                                                                    12,
-                                                                  ),
-                                                              border: Border.all(
-                                                                color: Colors
-                                                                    .white
-                                                                    .withValues(
-                                                                      alpha:
-                                                                          0.15,
-                                                                    ),
-                                                                width: 1.5,
-                                                              ),
-                                                              boxShadow: [
-                                                                BoxShadow(
-                                                                  color: Colors
-                                                                      .black
-                                                                      .withValues(
-                                                                        alpha:
-                                                                            0.6,
-                                                                      ),
-                                                                  blurRadius:
-                                                                      15,
-                                                                  offset:
-                                                                      const Offset(
-                                                                        0,
-                                                                        8,
-                                                                      ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                            clipBehavior:
-                                                                Clip.hardEdge,
-                                                            child:
-                                                                _previewThumbnail !=
-                                                                    null
-                                                                ? Image.memory(
-                                                                    _previewThumbnail!,
-                                                                    fit: BoxFit
-                                                                        .cover,
-                                                                  )
-                                                                : Video(
-                                                                    controller:
-                                                                        _previewController!,
-                                                                    controls:
-                                                                        NoVideoControls,
-                                                                    fit: BoxFit
-                                                                        .cover,
-                                                                  ),
-                                                          ),
-                                                          const SizedBox(
-                                                            height: 8,
-                                                          ),
-                                                        ],
                                                         Container(
-                                                          padding:
-                                                              const EdgeInsets.symmetric(
-                                                                horizontal: 16,
-                                                                vertical: 8,
-                                                              ),
+                                                          width: bubbleWidth,
+                                                          height: bubbleHeight,
                                                           decoration: BoxDecoration(
-                                                            color:
-                                                                const Color(
-                                                                  0xFF14151A,
-                                                                ).withValues(
-                                                                  alpha: 0.95,
-                                                                ),
+                                                            color: const Color(
+                                                              0xFF14171E,
+                                                            ),
                                                             borderRadius:
                                                                 BorderRadius.circular(
-                                                                  20,
+                                                                  12,
                                                                 ),
                                                             border: Border.all(
-                                                              color: Colors
-                                                                  .white
+                                                              color: Colors.white
                                                                   .withValues(
-                                                                    alpha: 0.1,
+                                                                    alpha:
+                                                                        0.22,
                                                                   ),
-                                                              width: 1,
+                                                              width: 1.5,
                                                             ),
                                                             boxShadow: [
                                                               BoxShadow(
@@ -3893,37 +4710,153 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                                                     .black
                                                                     .withValues(
                                                                       alpha:
-                                                                          0.5,
+                                                                          0.75,
                                                                     ),
-                                                                blurRadius: 10,
+                                                                blurRadius: 20,
                                                                 offset:
                                                                     const Offset(
                                                                       0,
-                                                                      4,
+                                                                      8,
                                                                     ),
                                                               ),
                                                             ],
                                                           ),
-                                                          child: Text(
-                                                            _fmt(
-                                                              Duration(
-                                                                seconds:
-                                                                    previewPosSec
-                                                                        .toInt(),
-                                                              ),
-                                                            ),
-                                                            style:
-                                                                const TextStyle(
-                                                                  fontSize: 15,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w800,
-                                                                  color: Colors
-                                                                      .white,
-                                                                  letterSpacing:
-                                                                      0.5,
+                                                          clipBehavior:
+                                                              Clip.hardEdge,
+                                                          child: Stack(
+                                                            fit: StackFit
+                                                                .expand,
+                                                            children: [
+                                                              // Dark gradient placeholder with film icon
+                                                              Container(
+                                                                decoration:
+                                                                    const BoxDecoration(
+                                                                      gradient:
+                                                                          LinearGradient(
+                                                                            begin: Alignment
+                                                                                .topLeft,
+                                                                            end: Alignment
+                                                                                .bottomRight,
+                                                                            colors: [
+                                                                              Color(
+                                                                                0xFF1F2430,
+                                                                              ),
+                                                                              Color(
+                                                                                0xFF101217,
+                                                                              ),
+                                                                            ],
+                                                                          ),
+                                                                    ),
+                                                                child: Center(
+                                                                  child: Icon(
+                                                                    Icons
+                                                                        .movie_outlined,
+                                                                    size: _isDesktop
+                                                                        ? 32
+                                                                        : 22,
+                                                                    color: Colors
+                                                                        .white
+                                                                        .withValues(
+                                                                          alpha:
+                                                                              0.2,
+                                                                        ),
+                                                                  ),
                                                                 ),
+                                                              ),
+                                                              // Thumbnail image or live video preview frame
+                                                              if (_previewThumbnail !=
+                                                                  null)
+                                                                Image.memory(
+                                                                  _previewThumbnail!,
+                                                                  fit: BoxFit
+                                                                      .cover,
+                                                                )
+                                                              else if (_previewController !=
+                                                                  null)
+                                                                Video(
+                                                                  controller:
+                                                                      _previewController!,
+                                                                  controls:
+                                                                      NoVideoControls,
+                                                                  fit: BoxFit
+                                                                      .cover,
+                                                                ),
+                                                            ],
                                                           ),
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 8,
+                                                        ),
+                                                        // Sleek liquid glass timestamp pill
+                                                        ClipRRect(
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                16,
+                                                              ),
+                                                          child:
+                                                              BackdropFilter(
+                                                                filter:
+                                                                    ImageFilter.blur(
+                                                                      sigmaX:
+                                                                          14,
+                                                                      sigmaY:
+                                                                          14,
+                                                                    ),
+                                                                child: Container(
+                                                                  padding:
+                                                                      const EdgeInsets.symmetric(
+                                                                        horizontal:
+                                                                            14,
+                                                                        vertical:
+                                                                            6,
+                                                                      ),
+                                                                  decoration:
+                                                                      BoxDecoration(
+                                                                        gradient:
+                                                                            LinearGradient(
+                                                                              begin: Alignment.topLeft,
+                                                                              end: Alignment.bottomRight,
+                                                                              colors: [
+                                                                                Colors.black.withValues(alpha: 0.88),
+                                                                                const Color(0xFF181B22).withValues(alpha: 0.88),
+                                                                              ],
+                                                                            ),
+                                                                        borderRadius:
+                                                                            BorderRadius.circular(16),
+                                                                        border:
+                                                                            Border.all(
+                                                                              color: Colors.white.withValues(alpha: 0.22),
+                                                                              width: 1,
+                                                                            ),
+                                                                        boxShadow: [
+                                                                          BoxShadow(
+                                                                            color: Colors.black.withValues(alpha: 0.5),
+                                                                            blurRadius: 8,
+                                                                            offset: const Offset(0, 3),
+                                                                          ),
+                                                                        ],
+                                                                      ),
+                                                                  child: Text(
+                                                                    _fmt(
+                                                                      Duration(
+                                                                        seconds:
+                                                                            previewPosSec.toInt(),
+                                                                      ),
+                                                                    ),
+                                                                    style:
+                                                                        const TextStyle(
+                                                                          fontSize:
+                                                                              13,
+                                                                          fontWeight:
+                                                                              FontWeight.w800,
+                                                                          color:
+                                                                              Colors.white,
+                                                                          letterSpacing:
+                                                                              0.5,
+                                                                        ),
+                                                                  ),
+                                                                ),
+                                                              ),
                                                         ),
                                                       ],
                                                     ),
@@ -4501,6 +5434,57 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                         ),
                                       ),
                                     ),
+                                    GestureDetector(
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const PlayerSubtitleSettingsPage(),
+                                          ),
+                                        );
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 5,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.07,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          border: Border.all(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.12,
+                                            ),
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons.tune_rounded,
+                                              size: 13,
+                                              color: Colors.white70,
+                                            ),
+                                            SizedBox(width: 4),
+                                            Text(
+                                              'STYLE',
+                                              style: TextStyle(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w900,
+                                                color: Colors.white70,
+                                                letterSpacing: 0.5,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
                                     const SizedBox(width: 6),
                                     GestureDetector(
                                       onTap: _loadLocalSubtitleFile,
@@ -4887,18 +5871,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   String _getBaseQuality(String q) {
-    final lower = q.toLowerCase();
-    if (lower.contains('2160p') ||
-        lower.contains('4k') ||
-        lower.contains('uhd'))
+    final lower = q.toLowerCase().trim();
+    if (lower == '2160' || lower == '2160p' || lower == '4k' || lower == 'uhd')
       return '4K';
-    if (lower.contains('1440p') || lower.contains('2k')) return '1440p';
-    if (lower.contains('1080p') || lower.contains('fhd')) return '1080p';
-    if (lower.contains('720p') || lower.contains('hd')) return '720p';
-    if (lower.contains('480p') || lower.contains('sd')) return '480p';
-    if (lower.contains('360p')) return '360p';
+    if (lower == '1440' || lower == '1440p' || lower == '2k' || lower == 'qhd')
+      return '1440p';
+    if (lower == '1080' || lower == '1080p' || lower == 'fhd') return '1080p';
+    if (lower == '720' || lower == '720p' || lower == 'hd') return '720p';
+    if (lower == '480' || lower == '480p' || lower == 'sd') return '480p';
+    if (lower == '360' || lower == '360p') return '360p';
+    if (lower.contains('2160') || lower.contains('4k')) return '4K';
+    if (lower.contains('1440')) return '1440p';
+    if (lower.contains('1080')) return '1080p';
+    if (lower.contains('720')) return '720p';
+    if (lower.contains('480')) return '480p';
+    if (lower.contains('360')) return '360p';
     if (q.isNotEmpty && q.toLowerCase() != 'auto') return q;
-    return '4K';
+    return '1080p';
   }
 
   String _getBaseProvider(String provider) {
@@ -5113,19 +6102,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                               final matchingHttpKeys = s.keys
                                   .where((k) => _getBaseQuality(k) == q)
                                   .toList();
-                              final httpProviders =
-                                  <String, Map<String, String>>{};
+                              // Group HTTP sources by serverName (e.g. "Alpha Server", "Beta Server")
+                              final Map<String, List<Map<String, String>>>
+                              serverGroups = {};
                               for (final k in matchingHttpKeys) {
                                 final provs = s[k]!;
                                 for (final p in provs.keys) {
-                                  final bp = _getBaseProvider(p);
-                                  if (!httpProviders.containsKey(bp)) {
-                                    httpProviders[bp] = {
-                                      'fullKey': k,
-                                      'originalProvider': p,
-                                      'url': provs[p]!,
-                                    };
-                                  }
+                                  final sName = _cleanProviderLabel(p);
+                                  serverGroups.putIfAbsent(sName, () => []);
+                                  serverGroups[sName]!.add({
+                                    'fullKey': k,
+                                    'originalProvider': p,
+                                    'url': provs[p]!,
+                                  });
                                 }
                               }
 
@@ -5139,8 +6128,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                   )
                                   .toList();
 
-                              if (httpProviders.isEmpty &&
-                                  torrentForQ.isEmpty) {
+                              if (serverGroups.isEmpty && torrentForQ.isEmpty) {
                                 return const SizedBox.shrink();
                               }
 
@@ -5182,23 +6170,52 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                 ),
                               );
 
-                              // ---------- HTTP SOURCES ----------
-                              final sortedBaseProviders =
-                                  httpProviders.keys.toList()..sort((a, b) {
-                                    final rankA = _getLanguageRank(a);
-                                    final rankB = _getLanguageRank(b);
-                                    if (rankA != rankB)
-                                      return rankA.compareTo(rankB);
-                                    return a.compareTo(b);
-                                  });
+                              // Sort servers: prioritized Alpha Server / Beta Server first, then others
+                              final serverOrder = [
+                                ...PlayerSettingsService().current
+                                    .getProviderPriority(),
+                                'Gamma Server',
+                                'Gamma 2 Server',
+                                'Delta Server',
+                                'Direct Server',
+                                'Epsilon Server',
+                                'P2P Server',
+                              ];
+                              final sortedServers = serverGroups.keys.toList()
+                                ..sort((a, b) {
+                                  final idxA = serverOrder.indexOf(a);
+                                  final idxB = serverOrder.indexOf(b);
+                                  if (idxA != -1 && idxB != -1)
+                                    return idxA.compareTo(idxB);
+                                  if (idxA != -1) return -1;
+                                  if (idxB != -1) return 1;
+                                  return a.compareTo(b);
+                                });
 
-                              if (sortedBaseProviders.isNotEmpty) {
-                                final baseProvider = sortedBaseProviders.first;
-                                final data = httpProviders[baseProvider]!;
-                                final fullKey = data['fullKey']!;
+                              // Render ONE card per server under this quality
+                              for (final serverName in sortedServers) {
+                                final streamsForServer =
+                                    serverGroups[serverName]!;
+                                // Pick best stream for this server by language priority
+                                streamsForServer.sort((a, b) {
+                                  final rankA = _getLanguageRank(
+                                    a['originalProvider']!,
+                                  );
+                                  final rankB = _getLanguageRank(
+                                    b['originalProvider']!,
+                                  );
+                                  if (rankA != rankB)
+                                    return rankA.compareTo(rankB);
+                                  return a['originalProvider']!.compareTo(
+                                    b['originalProvider']!,
+                                  );
+                                });
+
+                                final bestData = streamsForServer.first;
+                                final fullKey = bestData['fullKey']!;
                                 final originalProvider =
-                                    data['originalProvider']!;
-                                final url = data['url']!;
+                                    bestData['originalProvider']!;
+                                final url = bestData['url']!;
                                 final id = _httpSourceId(
                                   fullKey,
                                   originalProvider,
@@ -5206,7 +6223,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
                                 final isSelected =
                                     !_selectedIsTorrent &&
-                                    _getBaseQuality(_selectedQuality) == q;
+                                    _getBaseQuality(_selectedQuality) == q &&
+                                    _cleanProviderLabel(
+                                          _selectedProviderLabel ?? '',
+                                        ) ==
+                                        serverName;
 
                                 children.add(
                                   _buildQualitySourceCard(
@@ -5216,7 +6237,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                       isSelected: isSelected,
                                     ),
                                     title: _videoTitle,
-                                    subtitle: 'Alpha Server',
+                                    subtitle: serverName,
                                     trailingIconSelected:
                                         Icons.check_circle_rounded,
                                     trailingIconUnselected:
@@ -5471,6 +6492,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   String _cleanProviderLabel(String rawProvider) {
     final lower = rawProvider.toLowerCase().trim();
+
+    // Detect server tag from provider key (e.g. "English (Alpha)", "English (Beta)", "BetaServer", etc.)
+    if (lower.contains('beta')) return 'Beta Server';
+    if (lower.contains('alpha')) return 'Alpha Server';
+
     if (lower == 'filmyfly') return 'Beta Server';
     if (lower == 'lookmovie') return 'Gamma Server';
     if (lower == 'lookmovie2') return 'Gamma 2 Server';
@@ -5514,41 +6540,94 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     const map = {
       'hin': 'Hindi',
       'hindi': 'Hindi',
+      'hi': 'Hindi',
       'eng': 'English',
       'english': 'English',
+      'en': 'English',
       'tel': 'Telugu',
       'telugu': 'Telugu',
+      'te': 'Telugu',
       'tam': 'Tamil',
       'tamil': 'Tamil',
+      'ta': 'Tamil',
       'mal': 'Malayalam',
       'malayalam': 'Malayalam',
+      'ml': 'Malayalam',
       'kan': 'Kannada',
       'kannada': 'Kannada',
+      'kn': 'Kannada',
+      'ben': 'Bengali',
+      'bengali': 'Bengali',
+      'bn': 'Bengali',
+      'mar': 'Marathi',
+      'marathi': 'Marathi',
+      'mr': 'Marathi',
+      'guj': 'Gujarati',
+      'gujarati': 'Gujarati',
+      'gu': 'Gujarati',
+      'pan': 'Punjabi',
+      'punjabi': 'Punjabi',
+      'pa': 'Punjabi',
       'spa': 'Spanish',
       'spanish': 'Spanish',
+      'es': 'Spanish',
       'esla': 'Spanish (LA)',
       'fra': 'French',
       'fre': 'French',
       'french': 'French',
+      'fr': 'French',
       'ger': 'German',
       'deu': 'German',
       'german': 'German',
+      'de': 'German',
       'ita': 'Italian',
       'italian': 'Italian',
+      'it': 'Italian',
       'por': 'Portuguese',
       'ptbr': 'Portuguese (BR)',
       'portuguese': 'Portuguese',
+      'pt': 'Portuguese',
       'rus': 'Russian',
       'russian': 'Russian',
+      'ru': 'Russian',
       'jpn': 'Japanese',
       'japanese': 'Japanese',
+      'ja': 'Japanese',
       'kor': 'Korean',
       'korean': 'Korean',
+      'ko': 'Korean',
       'zho': 'Chinese',
       'chi': 'Chinese',
       'chinese': 'Chinese',
+      'zh': 'Chinese',
       'ara': 'Arabic',
       'arabic': 'Arabic',
+      'ar': 'Arabic',
+      'tur': 'Turkish',
+      'turkish': 'Turkish',
+      'tr': 'Turkish',
+      'tha': 'Thai',
+      'thai': 'Thai',
+      'th': 'Thai',
+      'urd': 'Urdu',
+      'urdu': 'Urdu',
+      'ur': 'Urdu',
+      'vie': 'Vietnamese',
+      'vietnamese': 'Vietnamese',
+      'vi': 'Vietnamese',
+      'ind': 'Indonesian',
+      'indonesian': 'Indonesian',
+      'id': 'Indonesian',
+      'pol': 'Polish',
+      'polish': 'Polish',
+      'pl': 'Polish',
+      'nld': 'Dutch',
+      'dut': 'Dutch',
+      'dutch': 'Dutch',
+      'nl': 'Dutch',
+      'swe': 'Swedish',
+      'swedish': 'Swedish',
+      'sv': 'Swedish',
       'und': 'Original',
     };
     if (map.containsKey(lower)) return map[lower]!;
@@ -5556,6 +6635,175 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       return lower[0].toUpperCase() + lower.substring(1);
     }
     return code.toUpperCase();
+  }
+
+  String _normalizeAudioTrackTitle({
+    String? title,
+    String? language,
+    int trackNumber = 1,
+  }) {
+    final rawTitle = (title ?? '').trim();
+    final rawLang = (language ?? '').trim();
+    final lowerTitle = rawTitle.toLowerCase();
+    final lowerLang = rawLang.toLowerCase();
+    final combined = '$lowerTitle $lowerLang';
+
+    String? lang;
+    bool matches(String pattern) =>
+        RegExp(pattern, caseSensitive: false).hasMatch(combined);
+
+    if (matches(r'\b(hin|hindi|hi)\b') || combined.contains('hindi')) {
+      lang = 'Hindi';
+    } else if (matches(r'\b(eng|english|en)\b') || combined.contains('english')) {
+      lang = 'English';
+    } else if (matches(r'\b(tam|tamil|ta)\b') || combined.contains('tamil')) {
+      lang = 'Tamil';
+    } else if (matches(r'\b(tel|telugu|te)\b') || combined.contains('telugu')) {
+      lang = 'Telugu';
+    } else if (matches(r'\b(mal|malayalam|ml)\b') || combined.contains('malayalam')) {
+      lang = 'Malayalam';
+    } else if (matches(r'\b(kan|kannada|kn)\b') || combined.contains('kannada')) {
+      lang = 'Kannada';
+    } else if (matches(r'\b(ben|bengali|bn|bangla)\b') ||
+        combined.contains('bengali') ||
+        combined.contains('bangla')) {
+      lang = 'Bengali';
+    } else if (matches(r'\b(mar|marathi|mr)\b') || combined.contains('marathi')) {
+      lang = 'Marathi';
+    } else if (matches(r'\b(guj|gujarati|gu)\b') || combined.contains('gujarati')) {
+      lang = 'Gujarati';
+    } else if (matches(r'\b(pan|punjabi|pa)\b') || combined.contains('punjabi')) {
+      lang = 'Punjabi';
+    } else if (matches(r'\b(jpn|japanese|ja)\b') || combined.contains('japanese')) {
+      lang = 'Japanese';
+    } else if (matches(r'\b(kor|korean|ko)\b') || combined.contains('korean')) {
+      lang = 'Korean';
+    } else if (matches(r'\b(spa|spanish|es|esla|es-la)\b') || combined.contains('spanish')) {
+      lang = 'Spanish';
+    } else if (matches(r'\b(fra|fre|french|fr)\b') || combined.contains('french')) {
+      lang = 'French';
+    } else if (matches(r'\b(ger|deu|german|de)\b') || combined.contains('german')) {
+      lang = 'German';
+    } else if (matches(r'\b(ita|italian|it)\b') || combined.contains('italian')) {
+      lang = 'Italian';
+    } else if (matches(r'\b(por|portuguese|pt|ptbr|pt-br)\b') || combined.contains('portuguese')) {
+      lang = 'Portuguese';
+    } else if (matches(r'\b(rus|russian|ru)\b') || combined.contains('russian')) {
+      lang = 'Russian';
+    } else if (matches(r'\b(zho|chi|chinese|zh|mandarin|cantonese)\b') ||
+        combined.contains('chinese') ||
+        combined.contains('mandarin')) {
+      lang = 'Chinese';
+    } else if (matches(r'\b(ara|arabic|ar)\b') || combined.contains('arabic')) {
+      lang = 'Arabic';
+    } else if (matches(r'\b(tur|turkish|tr)\b') || combined.contains('turkish')) {
+      lang = 'Turkish';
+    } else if (matches(r'\b(tha|thai|th)\b') || combined.contains('thai')) {
+      lang = 'Thai';
+    } else if (matches(r'\b(urd|urdu|ur)\b') || combined.contains('urdu')) {
+      lang = 'Urdu';
+    } else if (matches(r'\b(vie|vietnamese|vi)\b') || combined.contains('vietnamese')) {
+      lang = 'Vietnamese';
+    } else if (matches(r'\b(ind|indonesian|id)\b') || combined.contains('indonesian')) {
+      lang = 'Indonesian';
+    } else if (matches(r'\b(pol|polish|pl)\b') || combined.contains('polish')) {
+      lang = 'Polish';
+    } else if (matches(r'\b(nld|dut|dutch|nl)\b') || combined.contains('dutch')) {
+      lang = 'Dutch';
+    } else if (matches(r'\b(swe|swedish|sv)\b') || combined.contains('swedish')) {
+      lang = 'Swedish';
+    } else if (rawLang.isNotEmpty && lowerLang != 'und') {
+      final formatted = _formatLanguageName(rawLang);
+      if (formatted != rawLang.toUpperCase() && formatted.isNotEmpty) {
+        lang = formatted;
+      }
+    } else if (combined.contains('original')) {
+      lang = 'Original';
+    }
+
+    if (lang != null && lang.isNotEmpty) {
+      final clean = lang.replaceAll(RegExp(r'\s*audio\s*', caseSensitive: false), '').trim();
+      return '$clean Audio';
+    }
+
+    return 'Audio $trackNumber';
+  }
+
+  Map<int, String> _deduplicateAudioLabels(Map<int, String> map) {
+    final Map<String, List<int>> labelToKeys = {};
+    for (final entry in map.entries) {
+      labelToKeys.putIfAbsent(entry.value, () => []).add(entry.key);
+    }
+    final Map<int, String> result = {};
+    for (final entry in labelToKeys.entries) {
+      final label = entry.key;
+      final keys = entry.value;
+      if (keys.length == 1) {
+        result[keys.first] = label;
+      } else {
+        for (int k = 0; k < keys.length; k++) {
+          result[keys[k]] = '$label ${k + 1}';
+        }
+      }
+    }
+    return result;
+  }
+
+  String _buildSubtitleLabel(SubtitleTrack track, int index) {
+    final title = (track.title ?? '').trim();
+    final rawLang = (track.language ?? '').trim();
+
+    String langName = '';
+    if (rawLang.isNotEmpty && rawLang.toLowerCase() != 'und') {
+      langName = _formatLanguageName(rawLang);
+    }
+
+    if (title.isNotEmpty) {
+      final lowerTitle = title.toLowerCase();
+      // If title is just a language code like "eng", "hin", format to language name
+      if (title.length <= 4 && (rawLang.isEmpty || lowerTitle == rawLang.toLowerCase())) {
+        final formatted = _formatLanguageName(title);
+        if (formatted != title.toUpperCase() && formatted.isNotEmpty) {
+          return formatted;
+        }
+      }
+      if (langName.isNotEmpty &&
+          !lowerTitle.contains(langName.toLowerCase()) &&
+          lowerTitle != 'und') {
+        return '$title ($langName)';
+      }
+      return title;
+    }
+
+    if (langName.isNotEmpty && langName != 'Original') {
+      return langName;
+    }
+    return 'Subtitle ${index + 1}';
+  }
+
+  Map<int, String> _buildSubtitleMap(List<SubtitleTrack> subs) {
+    final Map<int, String> raw = {};
+    final Map<String, List<int>> nameToIndices = {};
+
+    for (int i = 0; i < subs.length; i++) {
+      final name = _buildSubtitleLabel(subs[i], i);
+      raw[i] = name;
+      nameToIndices.putIfAbsent(name, () => []).add(i);
+    }
+
+    final Map<int, String> result = {};
+    for (final entry in nameToIndices.entries) {
+      final name = entry.key;
+      final indices = entry.value;
+      if (indices.length == 1) {
+        result[indices.first] = name;
+      } else {
+        for (int k = 0; k < indices.length; k++) {
+          result[indices[k]] = '$name ${k + 1}';
+        }
+      }
+    }
+    return result;
   }
 
   String _buildTrackLabel(
@@ -5635,9 +6883,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
     final Map<String, dynamic> meta = _currentHttpMetadata;
     final String? logo = meta['logo'] as String?;
-    final String? plot =
-        (epSummary?.overview != null && epSummary!.overview!.isNotEmpty)
-        ? epSummary!.overview
+    final epOverview = epSummary?.overview;
+    final String? plot = (epOverview != null && epOverview.isNotEmpty)
+        ? epOverview
         : (meta['plot'] ?? meta['description'] ?? meta['overview']) as String?;
 
     final String? rating =
@@ -5649,8 +6897,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final String? year = meta['year']?.toString();
 
     int? runtimeMins;
-    if (epSummary?.runtime != null && epSummary!.runtime! > 0) {
-      runtimeMins = epSummary!.runtime;
+    final epRuntime = epSummary?.runtime;
+    if (epRuntime != null && epRuntime > 0) {
+      runtimeMins = epRuntime;
     } else if (meta['duration'] != null || meta['runtime'] != null) {
       final dynDur = meta['duration'] ?? meta['runtime'];
       if (dynDur is int)
@@ -5729,11 +6978,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                         maxHeight: isSmallScreen ? 90 : 140,
                         maxWidth: isSmallScreen ? 240 : 340,
                       ),
-                      child: CachedNetworkImage(
-                        imageUrl: logo,
+                      child: AppLogoWidget(
+                        url: logo,
                         fit: BoxFit.contain,
                         alignment: Alignment.centerLeft,
-                        errorWidget: (c, u, e) => titleWidget,
+                        errorBuilder: (_) => titleWidget,
                       ),
                     ),
                   )
@@ -5854,6 +7103,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   Widget _buildGestureHudOverlay() {
+    if (_isDesktop) return const SizedBox.shrink();
     if (!_showVolumeHud &&
         !_showBrightnessHud &&
         !_showLeftSeekRipple &&
@@ -5897,12 +7147,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                 ),
               ),
 
-            // Brightness HUD (Left Side)
+            // Brightness HUD (Right Side - when dragging left)
             if (_showBrightnessHud)
               Align(
-                alignment: Alignment.centerLeft,
+                alignment: Alignment.centerRight,
                 child: Container(
-                  margin: const EdgeInsets.only(left: 42),
+                  margin: const EdgeInsets.only(right: 42),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
                     vertical: 18,
@@ -5968,12 +7218,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                 ),
               ),
 
-            // Volume HUD (Right Side)
+            // Volume HUD (Left Side - when dragging right)
             if (_showVolumeHud)
               Align(
-                alignment: Alignment.centerRight,
+                alignment: Alignment.centerLeft,
                 child: Container(
-                  margin: const EdgeInsets.only(right: 42),
+                  margin: const EdgeInsets.only(left: 42),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
                     vertical: 18,
@@ -6252,3 +7502,199 @@ class _DoubleTapSeekRippleOverlayState extends State<DoubleTapSeekRippleOverlay>
     );
   }
 }
+
+/// Pure liquid glass text + icon combo button for desktop player controls (transparent distorted glass, no hover animation).
+class _DesktopTopComboButton extends StatelessWidget {
+  final Widget icon;
+  final String label;
+  final VoidCallback? onTap;
+  final String? tooltip;
+
+  const _DesktopTopComboButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.tooltip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isEnabled = onTap != null;
+
+    Widget button = MouseRegion(
+      cursor: isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(9),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(9),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 11),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withValues(alpha: 0.16),
+                      Colors.white.withValues(alpha: 0.05),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.28),
+                    width: 1.0,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    IconTheme(
+                      data: const IconThemeData(
+                        size: 18,
+                        color: Colors.white,
+                      ),
+                      child: icon,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13.0,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.15,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black54,
+                            blurRadius: 4,
+                            offset: Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (!isEnabled) {
+      button = Opacity(opacity: 0.45, child: button);
+    }
+
+    if (tooltip != null && tooltip!.isNotEmpty) {
+      return Tooltip(
+        message: tooltip!,
+        waitDuration: const Duration(milliseconds: 300),
+        child: button,
+      );
+    }
+
+    return button;
+  }
+}
+
+/// Pure liquid glass icon button for desktop top controls (transparent distorted glass, no hover animation).
+class _DesktopTopIconButton extends StatelessWidget {
+  final Widget icon;
+  final VoidCallback? onTap;
+  final String? tooltip;
+
+  const _DesktopTopIconButton({
+    required this.icon,
+    required this.onTap,
+    this.tooltip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isEnabled = onTap != null;
+
+    Widget button = MouseRegion(
+      cursor: isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(9),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(9),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withValues(alpha: 0.16),
+                      Colors.white.withValues(alpha: 0.05),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.28),
+                    width: 1.0,
+                  ),
+                ),
+                child: IconTheme(
+                  data: const IconThemeData(
+                    size: 19,
+                    color: Colors.white,
+                  ),
+                  child: icon,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (!isEnabled) {
+      button = Opacity(opacity: 0.45, child: button);
+    }
+
+    if (tooltip != null && tooltip!.isNotEmpty) {
+      return Tooltip(
+        message: tooltip!,
+        waitDuration: const Duration(milliseconds: 300),
+        child: button,
+      );
+    }
+
+    return button;
+  }
+}
+
+
+
+

@@ -4,11 +4,11 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
-  auto_updater_windows
   connectivity_plus
   firebase_core
   flutter_secure_storage_windows
   flutter_volume_controller
+  local_auth_windows
   local_notifier
   media_kit_libs_windows_video
   media_kit_video

@@ -38,3 +38,16 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# Automatically copy ExternalPlayer to build output directory if present
+set(EXTERNAL_PLAYER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../LuminoExternalPlayer/bin/Release/net10.0-windows")
+if(EXISTS "${EXTERNAL_PLAYER_DIR}")
+  add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${BINARY_NAME}>/ExternalPlayer"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${EXTERNAL_PLAYER_DIR}"
+      "$<TARGET_FILE_DIR:${BINARY_NAME}>/ExternalPlayer"
+    COMMENT "Copying LuminoExternalPlayer to build output"
+  )
+endif()
+

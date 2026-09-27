@@ -35,7 +35,11 @@ class _DownloadOverlayState extends State<DownloadOverlay> {
         }
 
         final entries = map.values.toList()
-          ..sort((a, b) => a.task.filename.compareTo(b.task.filename));
+          ..sort((a, b) {
+            final titleA = DownloadTaskMeta.fromMetaData(a.task.metaData).title;
+            final titleB = DownloadTaskMeta.fromMetaData(b.task.metaData).title;
+            return titleA.compareTo(titleB);
+          });
 
         return Align(
           alignment: Alignment.bottomRight,
@@ -194,6 +198,29 @@ class _DownloadOverlayState extends State<DownloadOverlay> {
   }
 }
 
+
+String _formatSpeed(double? bytesPerSecond) {
+  if (bytesPerSecond == null || bytesPerSecond <= 0) return '0 B/s';
+  if (bytesPerSecond < 1024) return '${bytesPerSecond.toStringAsFixed(1)} B/s';
+  if (bytesPerSecond < 1024 * 1024) {
+    return '${(bytesPerSecond / 1024).toStringAsFixed(1)} KB/s';
+  }
+  if (bytesPerSecond < 1024 * 1024 * 1024) {
+    return '${(bytesPerSecond / (1024 * 1024)).toStringAsFixed(1)} MB/s';
+  }
+  return '${(bytesPerSecond / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB/s';
+}
+
+String _formatDuration(Duration? duration) {
+  if (duration == null) return '--:--';
+  final hours = duration.inHours;
+  final minutes = duration.inMinutes.remainder(60);
+  final seconds = duration.inSeconds.remainder(60);
+  if (hours > 0) return '${hours}h ${minutes}m';
+  if (minutes > 0) return '${minutes}m ${seconds}s';
+  return '${seconds}s';
+}
+
 // ---------- SINGLE ROW ----------
 class _DownloadRowWindows extends StatelessWidget {
   final DownloadEntry entry;
@@ -212,6 +239,13 @@ class _DownloadRowWindows extends StatelessWidget {
       case TaskStatus.enqueued:
         return 'Waiting…';
       case TaskStatus.running:
+        if (entry.networkSpeed != null && entry.networkSpeed! > 0) {
+          final speed = _formatSpeed(entry.networkSpeed);
+          if (entry.timeRemaining != null && entry.timeRemaining!.inSeconds > 0) {
+            return '$speed • ${_formatDuration(entry.timeRemaining)}';
+          }
+          return speed;
+        }
         return 'Downloading…';
       case TaskStatus.paused:
         return 'Paused';
@@ -230,10 +264,14 @@ class _DownloadRowWindows extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final filename = entry.task.filename;
-    final title = entry.task.metaData.toString().isNotEmpty == true
-        ? entry.task.metaData.toString()
-        : filename;
+    final meta = DownloadTaskMeta.fromMetaData(entry.task.metaData);
+    var title = (meta.title.isNotEmpty && meta.title != 'Unknown')
+        ? meta.title
+        : entry.task.filename;
+    if (title.endsWith('.mp4') || title.endsWith('.mkv')) {
+      title = title.substring(0, title.lastIndexOf('.'));
+    }
+    final quality = meta.quality;
 
     final p = entry.progress.clamp(0.0, 1.0);
     final percent = (p * 100).toStringAsFixed(0);
@@ -283,19 +321,52 @@ class _DownloadRowWindows extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      decoration: TextDecoration
-                          .none, // <-- removes underline completely
-                      decorationColor: Colors.transparent,
-                      decorationStyle: TextDecorationStyle.solid,
-                    ),
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            decoration: TextDecoration.none,
+                            decorationColor: Colors.transparent,
+                            decorationStyle: TextDecorationStyle.solid,
+                          ),
+                        ),
+                      ),
+                      if (quality.isNotEmpty) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 1.5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFB561).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: const Color(0xFFFFB561).withValues(alpha: 0.4),
+                              width: 0.8,
+                            ),
+                          ),
+                          child: Text(
+                            quality,
+                            style: const TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFFFFB561),
+                              decoration: TextDecoration.none,
+                              decorationColor: Colors.transparent,
+                              decorationStyle: TextDecorationStyle.solid,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(width: 4),

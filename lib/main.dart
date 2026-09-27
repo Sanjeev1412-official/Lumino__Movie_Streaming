@@ -9,6 +9,7 @@ import 'package:windows_single_instance/windows_single_instance.dart';
 
 import 'package:lumino_app_moviestreaming/splashscreen.dart';
 import 'package:lumino_app_moviestreaming/auth_service.dart';
+import 'package:lumino_app_moviestreaming/biometric_lock_screen.dart';
 import 'package:lumino_app_moviestreaming/config/env_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_core/firebase_core.dart'; // <-- ADD THIS
@@ -155,6 +156,8 @@ class MyApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
       ),
+      builder: (context, child) =>
+          BiometricLockWrapper(child: child ?? const SizedBox.shrink()),
       home: const SplashScreen(),
     );
   }

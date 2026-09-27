@@ -32,29 +32,79 @@ class DownloadTaskMeta {
   });
 
   factory DownloadTaskMeta.fromMetaData(String? metaData) {
-    if (metaData == null || metaData.isEmpty) {
+    if (metaData == null || metaData.trim().isEmpty) {
       return DownloadTaskMeta(title: 'Unknown');
     }
+    final raw = metaData.trim();
     try {
-      final decoded = jsonDecode(metaData);
+      dynamic decoded = jsonDecode(raw);
+      if (decoded is String && decoded.trim().startsWith('{')) {
+        try {
+          decoded = jsonDecode(decoded);
+        } catch (_) {}
+      }
       if (decoded is Map) {
+        var title = decoded['title']?.toString() ?? 'Unknown';
+        var quality = decoded['quality']?.toString() ?? '';
+
+        // Handle case where title string itself contains nested JSON
+        if (title.trim().startsWith('{') && title.trim().endsWith('}')) {
+          try {
+            final inner = jsonDecode(title);
+            if (inner is Map) {
+              if (inner['title'] != null && inner['title'].toString().isNotEmpty) {
+                title = inner['title'].toString();
+              }
+              if (quality.isEmpty && inner['quality'] != null) {
+                quality = inner['quality'].toString();
+              }
+            }
+          } catch (_) {}
+        }
+
         return DownloadTaskMeta(
-          title: decoded['title'] ?? 'Unknown',
-          quality: decoded['quality'] ?? '',
+          title: title,
+          quality: quality,
           totalSize: decoded['totalSize']?.toDouble(),
-          tmdbId: decoded['tmdbId'],
-          mediaType: decoded['mediaType'],
-          season: decoded['season'],
-          episode: decoded['episode'],
-          posterPath: decoded['posterPath'],
-          primeboxUrl: decoded['primeboxUrl'],
+          tmdbId: decoded['tmdbId'] is int
+              ? decoded['tmdbId']
+              : int.tryParse(decoded['tmdbId']?.toString() ?? ''),
+          mediaType: decoded['mediaType']?.toString(),
+          season: decoded['season'] is int
+              ? decoded['season']
+              : int.tryParse(decoded['season']?.toString() ?? ''),
+          episode: decoded['episode'] is int
+              ? decoded['episode']
+              : int.tryParse(decoded['episode']?.toString() ?? ''),
+          posterPath: decoded['posterPath']?.toString(),
+          primeboxUrl: decoded['primeboxUrl']?.toString(),
         );
       }
     } catch (_) {
-      // Not JSON, assume it's just the title (old format)
-      return DownloadTaskMeta(title: metaData);
+      // If not standard JSON, check if it's a Dart map string: {title: ..., quality: ...}
+      if (raw.startsWith('{') && raw.endsWith('}')) {
+        final titleMatch =
+            RegExp(r'''['"]?title['"]?\s*:\s*([^,}]+)''').firstMatch(raw);
+        final qualityMatch =
+            RegExp(r'''['"]?quality['"]?\s*:\s*([^,}]+)''').firstMatch(raw);
+        final extractedTitle = titleMatch
+            ?.group(1)
+            ?.trim()
+            .replaceAll(RegExp(r'''^['"]|['"]$'''), '');
+        final extractedQuality = qualityMatch
+            ?.group(1)
+            ?.trim()
+            .replaceAll(RegExp(r'''^['"]|['"]$'''), '');
+        if (extractedTitle != null && extractedTitle.isNotEmpty) {
+          return DownloadTaskMeta(
+            title: extractedTitle,
+            quality: extractedQuality ?? '',
+          );
+        }
+      }
+      return DownloadTaskMeta(title: raw);
     }
-    return DownloadTaskMeta(title: metaData);
+    return DownloadTaskMeta(title: raw);
   }
 }
 
